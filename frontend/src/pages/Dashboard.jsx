@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { getDashboardSummary, getDashboardTrends } from '@/api/dashboard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
 import { formatCurrency } from '@/lib/utils'
@@ -76,7 +77,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Dashboard <HelpTip text="Visual charts of your money — income vs expenses, spending by category, bill status, and your net-cash trend over the last 6 months." /></h1>
         <p className="text-muted-foreground text-sm">
           {new Date(year, now.getMonth()).toLocaleString('default', { month: 'long', year: 'numeric' })} · last 6 months
         </p>

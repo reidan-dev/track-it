@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getSettings, updateSettings, testTelegram, exportModule } from '@/api/settings'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
@@ -73,7 +74,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <h1 className="text-2xl font-bold flex items-center gap-1.5">Settings <HelpTip text="Preferences, Telegram reminders, data export, plus managing People and payment methods." /></h1>
 
       <div className="flex gap-1 border-b border-border">
         {TABS.map(t => (

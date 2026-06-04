@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import auth, expenses, installments, bills, loans, income, people, dashboard, calendar, settings as settings_router, export, payment_methods
 
-app = FastAPI(title="Track-It API", version="1.0.0")
+app = FastAPI(title="track.it API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,

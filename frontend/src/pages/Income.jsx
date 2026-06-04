@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { getIncome, createIncome, updateIncome, deleteIncome } from '@/api/income'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
@@ -57,7 +58,7 @@ export default function Income() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Income</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Income <HelpTip text="Record what you earn each month, by source." /></h1>
         <Button onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM) }}>
           <Plus className="w-4 h-4 mr-2" />Add Income
         </Button>

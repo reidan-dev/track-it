@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getExpenses, createExpense, updateExpense, deleteExpense } from '@/api/expenses'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
@@ -9,6 +10,7 @@ import { Modal } from '@/components/shared/Modal'
 import { formatCurrency, EXPENSE_CATEGORIES, getBillingPeriod } from '@/lib/utils'
 import { PaymentMethodSelect, PaymentMethodBadge } from '@/components/shared/PaymentMethodSelect'
 import { Plus, Trash2, Pencil } from 'lucide-react'
+import { useOptimistic, tempId } from '@/lib/optimistic'
 
 const now = new Date()
 const EMPTY_FORM = { amount: '', category: 'Food', date: now.toISOString().slice(0, 10), note: '', payment_method: '' }
@@ -27,14 +29,26 @@ export default function Expenses() {
     queryFn: () => getExpenses({ month, year, ...(period ? { period } : {}) }).then(r => r.data),
   })
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['expenses'] })
-    qc.invalidateQueries({ queryKey: ['dashboard'] })
-  }
+  const expensesKey = ['expenses', month, year, period]
+  const also = [['expenses'], ['dashboard']]
 
-  const addMutation = useMutation({ mutationFn: createExpense, onSuccess: () => { invalidate(); closeForm() } })
-  const editMutation = useMutation({ mutationFn: ({ id, data }) => updateExpense(id, data), onSuccess: () => { invalidate(); closeForm() } })
-  const delMutation = useMutation({ mutationFn: deleteExpense, onSuccess: invalidate })
+  const addMutation = useOptimistic(qc, expensesKey, {
+    mutationFn: createExpense,
+    apply: (list, data) => [{ id: tempId(), ...data }, ...list],
+    onSuccess: () => closeForm(),
+    also,
+  })
+  const editMutation = useOptimistic(qc, expensesKey, {
+    mutationFn: ({ id, data }) => updateExpense(id, data),
+    apply: (list, { id, data }) => list.map(e => (e.id === id ? { ...e, ...data } : e)),
+    onSuccess: () => closeForm(),
+    also,
+  })
+  const delMutation = useOptimistic(qc, expensesKey, {
+    mutationFn: deleteExpense,
+    apply: (list, id) => list.filter(e => e.id !== id),
+    also,
+  })
 
   const openEdit = (e) => {
     setForm({ amount: String(e.amount), category: e.category, date: e.date, note: e.note || '', payment_method: e.payment_method || '' })
@@ -57,7 +71,7 @@ export default function Expenses() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Expenses</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Expenses <HelpTip text="Log one-off spending by category, period, and payment method." /></h1>
         <Button onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM) }}>
           <Plus className="w-4 h-4 mr-2" />Add Expense
         </Button>

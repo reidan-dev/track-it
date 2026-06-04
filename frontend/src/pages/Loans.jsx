@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getLoans, createLoan, updateLoan, deleteLoan, addLoanPayment, settleLoan } from '@/api/loans'
 import { getPeople } from '@/api/people'
@@ -9,6 +10,7 @@ import { Badge } from '@/components/shared/Badge'
 import { Modal } from '@/components/shared/Modal'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Trash2, Pencil } from 'lucide-react'
+import { useOptimistic, tempId } from '@/lib/optimistic'
 
 const EMPTY_FORM = { person_id: '', direction: 'borrowed', principal: '', interest_rate: '', total_terms: '', start_date: new Date().toISOString().slice(0, 10), notes: '' }
 
@@ -29,16 +31,33 @@ export default function Loans() {
   const activeFiltered = filtered.filter(l => l.status === 'active')
   const settledFiltered = filtered.filter(l => l.status === 'settled')
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['loans'] })
-
-  const addMutation = useMutation({ mutationFn: createLoan, onSuccess: () => { invalidate(); closeForm() } })
-  const editMutation = useMutation({ mutationFn: ({ id, data }) => updateLoan(id, data), onSuccess: () => { invalidate(); closeForm() } })
-  const delMutation = useMutation({ mutationFn: deleteLoan, onSuccess: invalidate })
-  const payMutation = useMutation({
-    mutationFn: ({ id, amount, note }) => addLoanPayment(id, { amount: parseFloat(amount), note }),
-    onSuccess: () => { invalidate(); setShowPay(null) },
+  const addMutation = useOptimistic(qc, ['loans'], {
+    mutationFn: createLoan,
+    apply: (loans, data) => [...loans, { id: tempId(), payments: [], terms_paid: 0, status: 'active', ...data }],
+    onSuccess: () => closeForm(),
   })
-  const settleMutation = useMutation({ mutationFn: (id) => settleLoan(id), onSuccess: invalidate })
+  const editMutation = useOptimistic(qc, ['loans'], {
+    mutationFn: ({ id, data }) => updateLoan(id, data),
+    apply: (loans, { id, data }) => loans.map(l => (l.id === id ? { ...l, ...data } : l)),
+    onSuccess: () => closeForm(),
+  })
+  const delMutation = useOptimistic(qc, ['loans'], {
+    mutationFn: deleteLoan,
+    apply: (loans, id) => loans.filter(l => l.id !== id),
+  })
+  const payMutation = useOptimistic(qc, ['loans'], {
+    mutationFn: ({ id, amount, note }) => addLoanPayment(id, { amount: parseFloat(amount), note }),
+    apply: (loans, { id, amount, note }) => loans.map(l => (l.id === id ? {
+      ...l,
+      payments: [...(l.payments || []), { id: tempId(), loan_id: id, amount: parseFloat(amount), note }],
+      terms_paid: (l.terms_paid || 0) + 1,
+    } : l)),
+    onSuccess: () => setShowPay(null),
+  })
+  const settleMutation = useOptimistic(qc, ['loans'], {
+    mutationFn: (id) => settleLoan(id),
+    apply: (loans, id) => loans.map(l => (l.id === id ? { ...l, status: 'settled' } : l)),
+  })
 
   const openEdit = (e, loan) => {
     e.stopPropagation()
@@ -82,7 +101,7 @@ export default function Loans() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Loans</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Loans <HelpTip text="Money you've borrowed or lent. Record payments and settle once fully paid." /></h1>
         <Button onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM) }}>
           <Plus className="w-4 h-4 mr-2" />Add Loan
         </Button>

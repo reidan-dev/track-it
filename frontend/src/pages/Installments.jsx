@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getInstallments, createInstallment, updateInstallment, deleteInstallment, payInstallment, unpayInstallment, settleInstallmentParticipant, unsettleInstallmentParticipant } from '@/api/installments'
 import { getPeople } from '@/api/people'
@@ -14,6 +15,7 @@ import { ParticipantsEditor, ME_ID } from '@/components/shared/ParticipantsEdito
 import { SplitTracker } from '@/components/shared/SplitTracker'
 import { Plus, Trash2, CheckCircle, Circle, Pencil, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useOptimistic, tempId } from '@/lib/optimistic'
 
 const now = new Date()
 
@@ -88,31 +90,71 @@ export default function Installments() {
       ? isPaidPeriod(inst, 1) && isPaidPeriod(inst, 2)
       : isPaidMonthly(inst)
 
-  const active = [...installments.filter(i => i.status === 'active')]
-    .sort((a, b) => Number(isFullyPaidThisMonth(a)) - Number(isFullyPaidThisMonth(b)))
+  const sortPaidLast = (arr) => [...arr].sort((a, b) => Number(isFullyPaidThisMonth(a)) - Number(isFullyPaidThisMonth(b)))
+  const periodOf = (inst) => inst.due_day ? getBillingPeriod(parseInt(String(inst.due_day).split(',')[0].trim())) : 1
+  const activeList = installments.filter(i => i.status === 'active')
   const completed = installments.filter(i => i.status === 'completed')
+  const p1 = sortPaidLast(activeList.filter(i => periodOf(i) === 1))
+  const p2 = sortPaidLast(activeList.filter(i => periodOf(i) === 2))
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['installments'] })
+  const newInstRow = (data) => ({ id: tempId(), payments: [], settlements: [], participants: [], participant_amounts: {}, status: 'active', terms_paid: 0, ...data })
 
-  const addMutation = useMutation({ mutationFn: createInstallment, onSuccess: () => { invalidate(); closeForm() } })
-  const editMutation = useMutation({ mutationFn: ({ id, data }) => updateInstallment(id, data), onSuccess: () => { invalidate(); closeForm() } })
-  const delMutation = useMutation({ mutationFn: deleteInstallment, onSuccess: invalidate })
-  const payMutation = useMutation({
+  const addMutation = useOptimistic(qc, ['installments'], {
+    mutationFn: createInstallment,
+    apply: (list, data) => [...list, newInstRow(data)],
+    onSuccess: () => closeForm(),
+  })
+  const addBiweeklyMutation = useOptimistic(qc, ['installments'], {
+    mutationFn: ({ p1, p2 }) => Promise.all([createInstallment(p1), createInstallment(p2)]),
+    apply: (list, { p1, p2 }) => [...list, newInstRow(p1), newInstRow(p2)],
+    onSuccess: () => closeForm(),
+  })
+  const editMutation = useOptimistic(qc, ['installments'], {
+    mutationFn: ({ id, data }) => updateInstallment(id, data),
+    apply: (list, { id, data }) => list.map(i => (i.id === id ? { ...i, ...data } : i)),
+    onSuccess: () => closeForm(),
+  })
+  const delMutation = useOptimistic(qc, ['installments'], {
+    mutationFn: deleteInstallment,
+    apply: (list, id) => list.filter(i => i.id !== id),
+  })
+  const payMutation = useOptimistic(qc, ['installments'], {
     mutationFn: ({ id, period = null }) => payInstallment(id, M, Y, period),
-    onSuccess: invalidate,
+    apply: (list, { id, period = null }) => list.map(i => {
+      if (i.id !== id) return i
+      const terms_paid = (i.terms_paid || 0) + 1
+      return {
+        ...i,
+        payments: [...(i.payments || []), { id: tempId(), installment_id: id, month: M, year: Y, period: period ?? null }],
+        terms_paid,
+        status: terms_paid >= i.total_terms ? 'completed' : i.status,
+      }
+    }),
   })
-
-  const unpayMutation = useMutation({
+  const unpayMutation = useOptimistic(qc, ['installments'], {
     mutationFn: ({ id, period = null }) => unpayInstallment(id, M, Y, period),
-    onSuccess: invalidate,
+    apply: (list, { id, period = null }) => list.map(i => {
+      if (i.id !== id) return i
+      const terms_paid = Math.max(0, (i.terms_paid || 0) - 1)
+      return {
+        ...i,
+        payments: (i.payments || []).filter(p => !(p.month === M && p.year === Y && (p.period ?? null) === (period ?? null))),
+        terms_paid,
+        status: i.status === 'completed' && terms_paid < i.total_terms ? 'active' : i.status,
+      }
+    }),
   })
-
-  const settleMutation = useMutation({
+  const settleMutation = useOptimistic(qc, ['installments'], {
     mutationFn: ({ id, personId, period, settled }) =>
       settled
         ? unsettleInstallmentParticipant(id, personId, M, Y, period)
         : settleInstallmentParticipant(id, personId, M, Y, period),
-    onSuccess: invalidate,
+    apply: (list, { id, personId, period, settled }) => list.map(i => (i.id === id ? {
+      ...i,
+      settlements: settled
+        ? (i.settlements || []).filter(s => !(s.person_id === personId && s.month === M && s.year === Y && (s.period ?? null) === (period ?? null)))
+        : [...(i.settlements || []), { id: tempId(), installment_id: id, person_id: personId, month: M, year: Y, period: period ?? null }],
+    } : i)),
   })
 
   const openEdit = (e, inst) => {
@@ -144,22 +186,29 @@ export default function Installments() {
   const handleSubmit = (e) => {
     e.preventDefault()
     const { due_day_1, due_day_2, ...rest } = form
-    const due_day = form.frequency === 'biweekly'
-      ? ([due_day_1, due_day_2].filter(d => d !== '' && d != null).map(d => String(d).trim()).join(', ') || null)
-      : (form.due_day || null)
-    const payload = {
+    const base = {
       ...rest,
       loaned_amount: form.loaned_amount !== '' ? parseFloat(form.loaned_amount) : null,
       installment_amount: parseFloat(form.installment_amount),
       total_terms: parseInt(form.total_terms),
       terms_paid: parseInt(form.terms_paid) || 0,
-      due_day,
     }
-    if (editingId) editMutation.mutate({ id: editingId, data: payload })
-    else addMutation.mutate(payload)
+    if (editingId) {
+      editMutation.mutate({ id: editingId, data: { ...base, due_day: form.due_day || null } })
+      return
+    }
+    // Biweekly creates two independent monthly installments, one per period.
+    if (form.frequency === 'biweekly') {
+      const mk = (day) => ({ ...base, frequency: 'monthly', due_day: day ? String(day).trim() : null })
+      addBiweeklyMutation.mutate({ p1: mk(due_day_1), p2: mk(due_day_2) })
+      return
+    }
+    addMutation.mutate({ ...base, frequency: 'monthly', due_day: form.due_day || null })
   }
 
-  const totalObligation = active.reduce((s, i) => s + parseFloat(i.installment_amount) * (i.frequency === 'biweekly' ? 2 : 1), 0)
+  const perMonth = (i) => parseFloat(i.installment_amount) * (i.frequency === 'biweekly' ? 2 : 1)
+  const paidThisMonth = activeList.filter(isFullyPaidThisMonth).reduce((s, i) => s + perMonth(i), 0)
+  const unpaidThisMonth = activeList.filter(i => !isFullyPaidThisMonth(i)).reduce((s, i) => s + perMonth(i), 0)
 
   const InstallmentCard = ({ inst, open, onToggleOpen }) => {
     const biweekly = inst.frequency === 'biweekly'
@@ -167,7 +216,6 @@ export default function Installments() {
     const completed = inst.status === 'completed'
     const totalAmount = inst.total_amount ?? (inst.total_terms * parseFloat(inst.installment_amount))
     const remaining = (inst.total_terms - inst.terms_paid) * parseFloat(inst.installment_amount)
-    const period = inst.due_day ? getBillingPeriod(inst.due_day) : null
     const hasSplit = (inst.participants?.length || 0) > 1
     const statusLabel = completed ? 'Done' : fullyPaid ? 'Paid' : biweekly ? `${[1,2].filter(p=>isPaidPeriod(inst,p)).length}/2 paid` : 'Unpaid'
 
@@ -215,10 +263,7 @@ export default function Installments() {
               <div className="flex items-center gap-1.5">
                 <span className="font-medium text-sm truncate">{inst.name}</span>
                 {hasSplit && <Users className="w-3 h-3 text-muted-foreground shrink-0" />}
-                {biweekly
-                  ? <Badge variant="warning" className="text-[10px]">biweekly</Badge>
-                  : period && <Badge variant={period === 1 ? 'default' : 'warning'} className="text-[10px]">P{period}</Badge>
-                }
+                {biweekly && <Badge variant="warning" className="text-[10px]">biweekly</Badge>}
               </div>
               <p className="text-xs text-muted-foreground truncate">
                 {inst.terms_paid}/{inst.total_terms} terms · {formatCurrency(remaining)} left
@@ -274,40 +319,48 @@ export default function Installments() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Installments</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Installments <HelpTip text="Things paid off over fixed terms (loans, gadgets). Track progress and per-term payments by period." /></h1>
         <Button onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM) }}>
           <Plus className="w-4 h-4 mr-2" />Add
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="py-4">
-          <p className="text-sm text-muted-foreground">Total obligations this month</p>
-          <p className="text-2xl font-bold">{formatCurrency(totalObligation)}</p>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-2 gap-4">
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Unpaid this month</p><p className="text-xl font-bold text-red-500">{formatCurrency(unpaidThisMonth)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Paid this month</p><p className="text-xl font-bold text-green-500">{formatCurrency(paidThisMonth)}</p></CardContent></Card>
+      </div>
 
-      {active.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Active</h2>
-          {active.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
+      {installments.length === 0 && <p className="text-sm text-muted-foreground">No installments yet.</p>}
+
+      {/* Period 1 */}
+      {p1.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Period 1 — 1st to 15th</h2>
+          {p1.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
         </div>
       )}
 
+      {/* Period 2 */}
+      {p2.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Period 2 — 16th to end</h2>
+          {p2.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
+        </div>
+      )}
+
+      {/* Completed */}
       {completed.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Completed</h2>
           {completed.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
         </div>
       )}
 
-      {installments.length === 0 && <p className="text-sm text-muted-foreground">No installments yet.</p>}
-
       <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Installment' : 'Add Installment'} className="max-w-lg"
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
-            <Button type="submit" form="installment-form" disabled={addMutation.isPending || editMutation.isPending}>
+            <Button type="submit" form="installment-form" disabled={addMutation.isPending || editMutation.isPending || addBiweeklyMutation.isPending}>
               {editingId ? 'Save changes' : 'Add'}
             </Button>
           </div>
@@ -345,10 +398,13 @@ export default function Installments() {
 
           <div className="space-y-1.5">
             <Label>Frequency</Label>
-            <Select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))}>
+            <Select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))} disabled={!!editingId}>
               <option value="monthly">Monthly (once/month)</option>
-              <option value="biweekly">Biweekly (P1 + P2 each month)</option>
+              <option value="biweekly">Biweekly (creates 2 installments)</option>
             </Select>
+            {form.frequency === 'biweekly' && !editingId && (
+              <p className="text-xs text-muted-foreground">Creates two separate installments — one in each period — that you edit independently.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

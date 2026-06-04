@@ -30,7 +30,7 @@ export default function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 h-full w-56 bg-card border-r border-border flex flex-col z-30">
       <div className="px-6 py-5 border-b border-border">
-        <span className="text-xl font-bold text-primary">Track-It</span>
+        <span className="text-xl font-bold text-primary">track.it</span>
       </div>
       <nav className="flex-1 py-4 overflow-y-auto">
         {nav.map(({ to, icon: Icon, label }) => (

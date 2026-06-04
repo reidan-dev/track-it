@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { getCalendarEvents } from '@/api/dashboard'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Badge } from '@/components/shared/Badge'
@@ -71,7 +72,7 @@ export default function CalendarPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Calendar</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Calendar <HelpTip text="A month view of when bills, installments, and income fall due." /></h1>
         <div className="flex items-center gap-2">
           <button onClick={prev} className="p-1.5 rounded hover:bg-accent"><ChevronLeft className="w-4 h-4" /></button>
           <span className="text-sm font-medium min-w-[140px] text-center">

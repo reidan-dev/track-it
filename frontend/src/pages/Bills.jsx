@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getBills, createBill, updateBill, deleteBill, payBill, unpayBill, settleBillParticipant, unsettleBillParticipant } from '@/api/bills'
 import { getPeople } from '@/api/people'
@@ -13,6 +14,7 @@ import { ParticipantsEditor, ME_ID } from '@/components/shared/ParticipantsEdito
 import { SplitTracker } from '@/components/shared/SplitTracker'
 import { Plus, Trash2, CheckCircle, Circle, Pencil, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useOptimistic, tempId } from '@/lib/optimistic'
 
 const now = new Date()
 const MONTH = now.getMonth() + 1
@@ -56,26 +58,52 @@ export default function Bills() {
     return started && !ended
   })
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['bills'] })
-  const addMutation = useMutation({ mutationFn: createBill, onSuccess: () => { invalidate(); closeForm() } })
-  const editMutation = useMutation({ mutationFn: ({ id, data }) => updateBill(id, data), onSuccess: () => { invalidate(); closeForm() } })
-  const delMutation = useMutation({ mutationFn: deleteBill, onSuccess: invalidate })
-  const payMutation = useMutation({
+  const newBillRow = (data) => ({ id: tempId(), payments: [], settlements: [], participants: [], participant_amounts: {}, ...data })
+
+  const addMutation = useOptimistic(qc, ['bills'], {
+    mutationFn: createBill,
+    apply: (bills, data) => [...bills, newBillRow(data)],
+    onSuccess: () => closeForm(),
+  })
+  const addBiweeklyMutation = useOptimistic(qc, ['bills'], {
+    mutationFn: ({ p1, p2 }) => Promise.all([createBill(p1), createBill(p2)]),
+    apply: (bills, { p1, p2 }) => [...bills, newBillRow(p1), newBillRow(p2)],
+    onSuccess: () => closeForm(),
+  })
+  const editMutation = useOptimistic(qc, ['bills'], {
+    mutationFn: ({ id, data }) => updateBill(id, data),
+    apply: (bills, { id, data }) => bills.map(b => (b.id === id ? { ...b, ...data } : b)),
+    onSuccess: () => closeForm(),
+  })
+  const delMutation = useOptimistic(qc, ['bills'], {
+    mutationFn: deleteBill,
+    apply: (bills, id) => bills.filter(b => b.id !== id),
+  })
+  const payMutation = useOptimistic(qc, ['bills'], {
     mutationFn: ({ id, period, amount }) => payBill(id, MONTH, YEAR, { period, amount }),
-    onSuccess: invalidate,
+    apply: (bills, { id, period, amount }) => bills.map(b => (b.id === id ? {
+      ...b,
+      payments: [...(b.payments || []), { id: tempId(), bill_id: id, month: MONTH, year: YEAR, period: period ?? null, amount_paid: amount ?? null }],
+    } : b)),
   })
-
-  const unpayMutation = useMutation({
+  const unpayMutation = useOptimistic(qc, ['bills'], {
     mutationFn: ({ id, period }) => unpayBill(id, MONTH, YEAR, { period }),
-    onSuccess: invalidate,
+    apply: (bills, { id, period }) => bills.map(b => (b.id === id ? {
+      ...b,
+      payments: (b.payments || []).filter(p => !(p.month === MONTH && p.year === YEAR && (p.period ?? null) === (period ?? null))),
+    } : b)),
   })
-
-  const settleMutation = useMutation({
+  const settleMutation = useOptimistic(qc, ['bills'], {
     mutationFn: ({ id, personId, period, settled }) =>
       settled
         ? unsettleBillParticipant(id, personId, MONTH, YEAR, period)
         : settleBillParticipant(id, personId, MONTH, YEAR, period),
-    onSuccess: invalidate,
+    apply: (bills, { id, personId, period, settled }) => bills.map(b => (b.id === id ? {
+      ...b,
+      settlements: settled
+        ? (b.settlements || []).filter(s => !(s.person_id === personId && s.month === MONTH && s.year === YEAR && (s.period ?? null) === (period ?? null)))
+        : [...(b.settlements || []), { id: tempId(), bill_id: id, person_id: personId, month: MONTH, year: YEAR, period: period ?? null }],
+    } : b)),
   })
 
   const isPaidMonthly = (bill) => bill.payments?.some(p => p.month === MONTH && p.year === YEAR && p.period == null)
@@ -120,11 +148,8 @@ export default function Bills() {
     }
     // Biweekly creates two independent monthly bills, one per period.
     if (form.frequency === 'biweekly') {
-      const mk = (day) => createBill({
-        ...base, frequency: 'monthly', due_day: parseInt(day),
-        start_month: MONTH, start_year: YEAR,
-      })
-      Promise.all([mk(form.due_day), mk(form.due_day_2)]).then(() => { invalidate(); closeForm() })
+      const mk = (day) => ({ ...base, frequency: 'monthly', due_day: parseInt(day), start_month: MONTH, start_year: YEAR })
+      addBiweeklyMutation.mutate({ p1: mk(form.due_day), p2: mk(form.due_day_2) })
       return
     }
     addMutation.mutate({ ...base, frequency: 'monthly', due_day: parseInt(form.due_day), start_month: MONTH, start_year: YEAR })
@@ -178,7 +203,7 @@ export default function Bills() {
             </div>
             <p className="text-xs text-muted-foreground truncate">
               {bill.category}
-              {biweekly ? ' · biweekly · P1 & P2' : ` · due ${bill.due_day} · P${getBillingPeriod(bill.due_day)}`}
+              {biweekly ? ' · biweekly' : ` · due ${bill.due_day}`}
               {bill.is_recurring && ' · recurring'}
             </p>
           </button>
@@ -226,7 +251,7 @@ export default function Bills() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Bills</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Bills <HelpTip text="Recurring bills grouped by pay period. Mark them paid and track who shares the cost." /></h1>
         <Button onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM) }}>
           <Plus className="w-4 h-4 mr-2" />Add Bill
         </Button>
@@ -260,7 +285,7 @@ export default function Bills() {
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
-            <Button type="submit" form="bill-form" disabled={addMutation.isPending || editMutation.isPending}>
+            <Button type="submit" form="bill-form" disabled={addMutation.isPending || editMutation.isPending || addBiweeklyMutation.isPending}>
               {editingId ? 'Save changes' : 'Add'}
             </Button>
           </div>

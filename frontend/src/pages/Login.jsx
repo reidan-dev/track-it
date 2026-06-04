@@ -30,7 +30,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary">Track-It</h1>
+          <h1 className="text-3xl font-bold text-primary">track.it</h1>
           <p className="text-muted-foreground mt-1 text-sm">Personal Finance Tracker</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-card border border-border rounded-lg p-6 space-y-4 shadow-sm">

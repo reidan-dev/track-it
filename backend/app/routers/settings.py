@@ -64,7 +64,7 @@ async def test_telegram(
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json={
             "chat_id": s.telegram_chat_id,
-            "text": "Track-It: Telegram integration is working!",
+            "text": "track.it: Telegram integration is working!",
         })
     if resp.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to send Telegram message")

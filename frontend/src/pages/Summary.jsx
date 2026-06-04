@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery } from '@tanstack/react-query'
 import { getDashboardSummary } from '@/api/dashboard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
@@ -58,7 +59,6 @@ function PersonBalanceRow({ person }) {
                 <div className="flex items-center gap-1.5 min-w-0">
                   <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
                   <span className="text-muted-foreground truncate">{s.label}</span>
-                  {s.period && <span className="text-[10px] text-muted-foreground shrink-0">P{s.period}</span>}
                 </div>
                 <span className={cn('font-medium shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
                   {owed ? '+' : '−'}{formatCurrency(s.amount)}
@@ -119,7 +119,7 @@ export default function Summary() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Summary</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-1.5">Summary <HelpTip text="This month at a glance: your net cash, category totals, who owes you (and whom you owe), and what's due in the next 7 days." /></h1>
         <p className="text-muted-foreground text-sm">
           {new Date(now.getFullYear(), now.getMonth()).toLocaleString('default', { month: 'long', year: 'numeric' })}
         </p>
