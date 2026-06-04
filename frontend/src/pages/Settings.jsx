@@ -5,13 +5,22 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Ca
 import { Button } from '@/components/shared/Button'
 import { Input, Label, Select } from '@/components/shared/Input'
 import { Badge } from '@/components/shared/Badge'
+import { cn } from '@/lib/utils'
+import People from '@/pages/People'
+import PaymentMethods from '@/pages/PaymentMethods'
 
 const CURRENCIES = ['PHP', 'USD', 'EUR', 'JPY', 'SGD']
 const THEMES = ['system', 'light', 'dark']
 const MODULES = ['expenses', 'bills', 'installments', 'loans', 'income']
+const TABS = [
+  { id: 'general', label: 'General' },
+  { id: 'people', label: 'People' },
+  { id: 'methods', label: 'Pay Methods' },
+]
 
 export default function Settings() {
   const qc = useQueryClient()
+  const [tab, setTab] = useState('general')
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => getSettings().then(r => r.data) })
   const [form, setForm] = useState({ currency: 'PHP', theme: 'system', telegram_bot_token: '', telegram_chat_id: '', telegram_enabled: false })
   const [testMsg, setTestMsg] = useState('')
@@ -66,6 +75,28 @@ export default function Settings() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Settings</h1>
 
+      <div className="flex gap-1 border-b border-border">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              'px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors',
+              tab === t.id
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'people' && <People embedded />}
+      {tab === 'methods' && <PaymentMethods embedded />}
+
+      {tab === 'general' && (
+      <div className="space-y-6">
       <Card>
         <CardHeader><CardTitle className="text-sm">Preferences</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -122,6 +153,8 @@ export default function Settings() {
           {exportStatus && <p className="text-sm text-muted-foreground mt-2">{exportStatus}</p>}
         </CardContent>
       </Card>
+      </div>
+      )}
     </div>
   )
 }

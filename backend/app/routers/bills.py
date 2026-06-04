@@ -4,7 +4,7 @@ from typing import Optional
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
-from app.models.bill import Bill, BillPayment
+from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.schemas.bill import BillCreate, BillUpdate, BillOut
 
 router = APIRouter(prefix="/bills", tags=["bills"])
@@ -61,11 +61,40 @@ def delete_bill(
     db.commit()
 
 
+@router.delete("/{bill_id}/pay/{month}/{year}", response_model=BillOut)
+def unpay_bill(
+    bill_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bill = db.query(Bill).filter(Bill.id == bill_id, Bill.user_id == current_user.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    q = db.query(BillPayment).filter(
+        BillPayment.bill_id == bill_id,
+        BillPayment.month == month,
+        BillPayment.year == year,
+    )
+    if period is not None:
+        q = q.filter(BillPayment.period == period)
+    payment = q.first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    db.delete(payment)
+    db.commit()
+    db.refresh(bill)
+    return bill
+
+
 @router.post("/{bill_id}/pay/{month}/{year}", response_model=BillOut)
 def pay_bill(
     bill_id: int,
     month: int,
     year: int,
+    period: Optional[int] = None,
     amount_paid: Optional[float] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -73,13 +102,16 @@ def pay_bill(
     bill = db.query(Bill).filter(Bill.id == bill_id, Bill.user_id == current_user.id).first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    existing = db.query(BillPayment).filter(
+    q = db.query(BillPayment).filter(
         BillPayment.bill_id == bill_id,
         BillPayment.month == month,
         BillPayment.year == year,
-    ).first()
+    )
+    if period is not None:
+        q = q.filter(BillPayment.period == period)
+    existing = q.first()
     if existing:
-        existing.amount_paid = amount_paid or bill.amount
+        existing.amount_paid = amount_paid
         db.commit()
         db.refresh(bill)
         return bill
@@ -87,9 +119,73 @@ def pay_bill(
         bill_id=bill_id,
         month=month,
         year=year,
-        amount_paid=amount_paid or bill.amount,
+        period=period,
+        amount_paid=amount_paid,
     )
     db.add(payment)
     db.commit()
+    db.refresh(bill)
+    return bill
+
+
+@router.post("/{bill_id}/settle/{person_id}/{month}/{year}", response_model=BillOut)
+def settle_bill_participant(
+    bill_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bill = db.query(Bill).filter(Bill.id == bill_id, Bill.user_id == current_user.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    q = db.query(BillParticipantSettlement).filter(
+        BillParticipantSettlement.bill_id == bill_id,
+        BillParticipantSettlement.person_id == person_id,
+        BillParticipantSettlement.month == month,
+        BillParticipantSettlement.year == year,
+    )
+    if period is not None:
+        q = q.filter(BillParticipantSettlement.period == period)
+    else:
+        q = q.filter(BillParticipantSettlement.period.is_(None))
+    if not q.first():
+        db.add(BillParticipantSettlement(
+            bill_id=bill_id, person_id=person_id, month=month, year=year, period=period,
+        ))
+        db.commit()
+    db.refresh(bill)
+    return bill
+
+
+@router.delete("/{bill_id}/settle/{person_id}/{month}/{year}", response_model=BillOut)
+def unsettle_bill_participant(
+    bill_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bill = db.query(Bill).filter(Bill.id == bill_id, Bill.user_id == current_user.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    q = db.query(BillParticipantSettlement).filter(
+        BillParticipantSettlement.bill_id == bill_id,
+        BillParticipantSettlement.person_id == person_id,
+        BillParticipantSettlement.month == month,
+        BillParticipantSettlement.year == year,
+    )
+    if period is not None:
+        q = q.filter(BillParticipantSettlement.period == period)
+    else:
+        q = q.filter(BillParticipantSettlement.period.is_(None))
+    row = q.first()
+    if row:
+        db.delete(row)
+        db.commit()
     db.refresh(bill)
     return bill

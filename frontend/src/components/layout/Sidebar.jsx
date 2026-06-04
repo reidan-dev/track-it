@@ -1,20 +1,20 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Calendar, Receipt, FileText, CreditCard,
-  Landmark, TrendingUp, Users, Settings, LogOut,
+  LayoutDashboard, ClipboardList, Calendar, Receipt, FileText, CreditCard,
+  Landmark, TrendingUp, Settings, LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 
 const nav = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/summary', icon: ClipboardList, label: 'Summary' },
   { to: '/calendar', icon: Calendar, label: 'Calendar' },
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/bills', icon: FileText, label: 'Bills' },
   { to: '/installments', icon: CreditCard, label: 'Installments' },
   { to: '/loans', icon: Landmark, label: 'Loans' },
   { to: '/income', icon: TrendingUp, label: 'Income' },
-  { to: '/people', icon: Users, label: 'People' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

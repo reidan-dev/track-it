@@ -12,6 +12,7 @@ class Expense(Base):
     category = Column(String, nullable=False)
     date = Column(Date, nullable=False)
     note = Column(Text, nullable=True)
+    payment_method = Column(String, nullable=True)
     period = Column(Integer, nullable=False)  # 1 or 2
     month = Column(Integer, nullable=False)
     year = Column(Integer, nullable=False)

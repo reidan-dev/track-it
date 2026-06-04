@@ -39,7 +39,7 @@ def get_calendar_events(
             "type": "bill",
             "id": bill.id,
             "name": bill.name,
-            "amount": float(bill.amount),
+            "amount": float(bill.amount) if bill.amount is not None else 0,
             "date": date(year, month, due_day).isoformat(),
             "paid": bill.id in paid_bill_ids,
         })

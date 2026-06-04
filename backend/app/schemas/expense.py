@@ -9,6 +9,7 @@ class ExpenseCreate(BaseModel):
     category: str
     date: date
     note: Optional[str] = None
+    payment_method: Optional[str] = None
     period: int
     month: int
     year: int
@@ -19,6 +20,7 @@ class ExpenseUpdate(BaseModel):
     category: Optional[str] = None
     date: Optional[date] = None
     note: Optional[str] = None
+    payment_method: Optional[str] = None
     period: Optional[int] = None
     month: Optional[int] = None
     year: Optional[int] = None
@@ -31,6 +33,7 @@ class ExpenseOut(BaseModel):
     category: str
     date: date
     note: Optional[str] = None
+    payment_method: Optional[str] = None
     period: int
     month: int
     year: int

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import Optional
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
-from app.models.installment import Installment, InstallmentPayment
+from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.schemas.installment import InstallmentCreate, InstallmentUpdate, InstallmentOut
 
 router = APIRouter(prefix="/installments", tags=["installments"])
@@ -60,29 +61,126 @@ def delete_installment(
     db.commit()
 
 
-@router.post("/{inst_id}/pay/{month}/{year}", response_model=InstallmentOut)
-def pay_installment(
+@router.delete("/{inst_id}/pay/{month}/{year}", response_model=InstallmentOut)
+def unpay_installment(
     inst_id: int,
     month: int,
     year: int,
+    period: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     inst = db.query(Installment).filter(Installment.id == inst_id, Installment.user_id == current_user.id).first()
     if not inst:
         raise HTTPException(status_code=404, detail="Installment not found")
-    existing = db.query(InstallmentPayment).filter(
+    q = db.query(InstallmentPayment).filter(
         InstallmentPayment.installment_id == inst_id,
         InstallmentPayment.month == month,
         InstallmentPayment.year == year,
-    ).first()
-    if existing:
+    )
+    if period is not None:
+        q = q.filter(InstallmentPayment.period == period)
+    payment = q.first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    db.delete(payment)
+    inst.terms_paid = max(0, inst.terms_paid - 1)
+    if inst.status == "completed" and inst.terms_paid < inst.total_terms:
+        inst.status = "active"
+    db.commit()
+    db.refresh(inst)
+    return inst
+
+
+@router.post("/{inst_id}/pay/{month}/{year}", response_model=InstallmentOut)
+def pay_installment(
+    inst_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    inst = db.query(Installment).filter(Installment.id == inst_id, Installment.user_id == current_user.id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Installment not found")
+    q = db.query(InstallmentPayment).filter(
+        InstallmentPayment.installment_id == inst_id,
+        InstallmentPayment.month == month,
+        InstallmentPayment.year == year,
+    )
+    if period is not None:
+        q = q.filter(InstallmentPayment.period == period)
+    if q.first():
         raise HTTPException(status_code=400, detail="Already paid for this period")
-    payment = InstallmentPayment(installment_id=inst_id, month=month, year=year)
+    payment = InstallmentPayment(installment_id=inst_id, month=month, year=year, period=period)
     db.add(payment)
     inst.terms_paid += 1
     if inst.terms_paid >= inst.total_terms:
         inst.status = "completed"
     db.commit()
+    db.refresh(inst)
+    return inst
+
+
+@router.post("/{inst_id}/settle/{person_id}/{month}/{year}", response_model=InstallmentOut)
+def settle_installment_participant(
+    inst_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    inst = db.query(Installment).filter(Installment.id == inst_id, Installment.user_id == current_user.id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Installment not found")
+    q = db.query(InstallmentParticipantSettlement).filter(
+        InstallmentParticipantSettlement.installment_id == inst_id,
+        InstallmentParticipantSettlement.person_id == person_id,
+        InstallmentParticipantSettlement.month == month,
+        InstallmentParticipantSettlement.year == year,
+    )
+    if period is not None:
+        q = q.filter(InstallmentParticipantSettlement.period == period)
+    else:
+        q = q.filter(InstallmentParticipantSettlement.period.is_(None))
+    if not q.first():
+        db.add(InstallmentParticipantSettlement(
+            installment_id=inst_id, person_id=person_id, month=month, year=year, period=period,
+        ))
+        db.commit()
+    db.refresh(inst)
+    return inst
+
+
+@router.delete("/{inst_id}/settle/{person_id}/{month}/{year}", response_model=InstallmentOut)
+def unsettle_installment_participant(
+    inst_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    inst = db.query(Installment).filter(Installment.id == inst_id, Installment.user_id == current_user.id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Installment not found")
+    q = db.query(InstallmentParticipantSettlement).filter(
+        InstallmentParticipantSettlement.installment_id == inst_id,
+        InstallmentParticipantSettlement.person_id == person_id,
+        InstallmentParticipantSettlement.month == month,
+        InstallmentParticipantSettlement.year == year,
+    )
+    if period is not None:
+        q = q.filter(InstallmentParticipantSettlement.period == period)
+    else:
+        q = q.filter(InstallmentParticipantSettlement.period.is_(None))
+    row = q.first()
+    if row:
+        db.delete(row)
+        db.commit()
     db.refresh(inst)
     return inst

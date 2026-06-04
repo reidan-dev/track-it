@@ -9,6 +9,8 @@ class PersonCreate(BaseModel):
     relationship_type: str = "Other"
     contact_info: Optional[str] = None
     notes: Optional[str] = None
+    emoji: Optional[str] = None
+    color: Optional[str] = None
 
 
 class PersonUpdate(BaseModel):
@@ -17,6 +19,8 @@ class PersonUpdate(BaseModel):
     relationship_type: Optional[str] = None
     contact_info: Optional[str] = None
     notes: Optional[str] = None
+    emoji: Optional[str] = None
+    color: Optional[str] = None
 
 
 class PersonOut(BaseModel):
@@ -27,6 +31,8 @@ class PersonOut(BaseModel):
     relationship_type: str
     contact_info: Optional[str] = None
     notes: Optional[str] = None
+    emoji: Optional[str] = None
+    color: Optional[str] = None
 
     class Config:
         from_attributes = True

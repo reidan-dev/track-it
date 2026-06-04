@@ -28,7 +28,17 @@ export const EXPENSE_CATEGORIES = [
 
 export const INCOME_TYPES = ['Salary', 'Freelance', 'Other']
 
-export const RELATIONSHIP_TYPES = ['Family', 'Friend', 'Colleague', 'Acquaintance', 'Other']
+export const RELATIONSHIP_TYPES = ['Partner', 'Family', 'Friend', 'Colleague', 'Acquaintance', 'Other']
+
+export const PAYMENT_METHODS = [
+  { value: 'Cash',          icon: '💵' },
+  { value: 'GCash',         icon: '📱' },
+  { value: 'Maya',          icon: '💜' },
+  { value: 'Credit Card',   icon: '💳' },
+  { value: 'Debit Card',    icon: '🏧' },
+  { value: 'Bank Transfer', icon: '🏦' },
+  { value: 'Other',         icon: '🔄' },
+]
 
 export const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',

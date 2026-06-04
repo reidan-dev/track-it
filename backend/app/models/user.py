@@ -21,6 +21,7 @@ class User(Base):
     loans = relationship("Loan", back_populates="user", cascade="all, delete-orphan")
     incomes = relationship("Income", back_populates="user", cascade="all, delete-orphan")
     people = relationship("Person", back_populates="user", cascade="all, delete-orphan")
+    payment_methods = relationship("PaymentMethod", back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSettings(Base):
