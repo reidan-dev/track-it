@@ -1,0 +1,71 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+import httpx
+from app.database import get_db
+from app.auth import get_current_user
+from app.models.user import User, UserSettings
+from app.schemas.user import UserSettingsOut, UserSettingsUpdate
+
+router = APIRouter(prefix="/settings", tags=["settings"])
+
+
+def _get_or_create_settings(user: User, db: Session) -> UserSettings:
+    if not user.settings:
+        settings = UserSettings(user_id=user.id)
+        db.add(settings)
+        db.commit()
+        db.refresh(user)
+    return user.settings
+
+
+@router.get("")
+def get_settings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    s = _get_or_create_settings(current_user, db)
+    result = UserSettingsOut.model_validate(s).model_dump()
+    result["currency"] = current_user.currency
+    result["theme"] = current_user.theme
+    return result
+
+
+@router.put("")
+def update_settings(
+    data: UserSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    s = _get_or_create_settings(current_user, db)
+    update_data = data.model_dump(exclude_unset=True)
+    if "currency" in update_data:
+        current_user.currency = update_data.pop("currency")
+    if "theme" in update_data:
+        current_user.theme = update_data.pop("theme")
+    for field, value in update_data.items():
+        setattr(s, field, value)
+    db.commit()
+    db.refresh(s)
+    result = UserSettingsOut.model_validate(s).model_dump()
+    result["currency"] = current_user.currency
+    result["theme"] = current_user.theme
+    return result
+
+
+@router.post("/telegram/test")
+async def test_telegram(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    s = _get_or_create_settings(current_user, db)
+    if not s.telegram_bot_token or not s.telegram_chat_id:
+        raise HTTPException(status_code=400, detail="Telegram not configured")
+    url = f"https://api.telegram.org/bot{s.telegram_bot_token}/sendMessage"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json={
+            "chat_id": s.telegram_chat_id,
+            "text": "Track-It: Telegram integration is working!",
+        })
+    if resp.status_code != 200:
+        raise HTTPException(status_code=400, detail="Failed to send Telegram message")
+    return {"message": "Test message sent"}
