@@ -16,6 +16,7 @@ import { SplitTracker } from '@/components/shared/SplitTracker'
 import { Plus, Trash2, CheckCircle, Circle, Pencil, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
+import { usePeriod } from '@/contexts/PeriodContext'
 
 const now = new Date()
 
@@ -42,7 +43,7 @@ function PeriodBadge({ due_day }) {
   const period = getBillingPeriod(parseInt(due_day))
   return (
     <Badge variant={period === 1 ? 'default' : 'warning'}>
-      Period {period} (due {due_day}{ordinal(due_day)})
+      {period === 1 ? '1st–15th' : '16th–end'} (due {due_day}{ordinal(due_day)})
     </Badge>
   )
 }
@@ -76,8 +77,7 @@ export default function Installments() {
     queryFn: () => getPeople().then(r => r.data),
   })
 
-  const M = now.getMonth() + 1
-  const Y = now.getFullYear()
+  const { month: M, year: Y } = usePeriod()
 
   const isPaidPeriod = (inst, period) =>
     inst.payments?.some(p => p.month === M && p.year === Y && p.period === period)
@@ -240,7 +240,7 @@ export default function Installments() {
                       className={cn('flex flex-col items-center gap-0.5 text-[10px] transition-colors',
                         pPaid ? 'text-green-500 hover:text-red-400' : 'text-muted-foreground hover:text-primary')}>
                       {pPaid ? <CheckCircle className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-                      P{p}
+                      {p === 1 ? '1–15' : '16+'}
                     </button>
                   )
                 })}
@@ -335,7 +335,7 @@ export default function Installments() {
       {/* Period 1 */}
       {p1.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Period 1 — 1st to 15th</h2>
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">1st – 15th</h2>
           {p1.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
         </div>
       )}
@@ -343,7 +343,7 @@ export default function Installments() {
       {/* Period 2 */}
       {p2.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Period 2 — 16th to end</h2>
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">16th – end of month</h2>
           {p2.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
         </div>
       )}
@@ -422,11 +422,11 @@ export default function Installments() {
           {form.frequency === 'biweekly' ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>P1 Due Day <span className="text-muted-foreground text-xs">(1–15)</span></Label>
+                <Label>First due day <span className="text-muted-foreground text-xs">(1–15)</span></Label>
                 <Input type="number" min="1" max="15" value={form.due_day_1} onChange={e => setForm(f => ({ ...f, due_day_1: e.target.value }))} placeholder="e.g. 5" />
               </div>
               <div className="space-y-1.5">
-                <Label>P2 Due Day <span className="text-muted-foreground text-xs">(16–31)</span></Label>
+                <Label>Second due day <span className="text-muted-foreground text-xs">(16–31)</span></Label>
                 <Input type="number" min="16" max="31" value={form.due_day_2} onChange={e => setForm(f => ({ ...f, due_day_2: e.target.value }))} placeholder="e.g. 20" />
               </div>
             </div>

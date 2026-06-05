@@ -1,5 +1,5 @@
 from app.models.user import User, UserSettings
-from app.models.expense import Expense
+from app.models.expense import Expense, ExpenseParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.loan import Loan, LoanPayment
@@ -9,7 +9,7 @@ from app.models.payment_method import PaymentMethod
 
 __all__ = [
     "User", "UserSettings",
-    "Expense",
+    "Expense", "ExpenseParticipantSettlement",
     "Installment", "InstallmentPayment", "InstallmentParticipantSettlement",
     "Bill", "BillPayment", "BillParticipantSettlement",
     "Loan", "LoanPayment",

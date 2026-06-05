@@ -15,10 +15,8 @@ import { SplitTracker } from '@/components/shared/SplitTracker'
 import { Plus, Trash2, CheckCircle, Circle, Pencil, ChevronDown, ChevronUp, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
+import { usePeriod } from '@/contexts/PeriodContext'
 
-const now = new Date()
-const MONTH = now.getMonth() + 1
-const YEAR = now.getFullYear()
 const BILL_CATEGORIES = ['Rent', 'Utilities', 'Subscription', 'Insurance', 'Other']
 const EMPTY_FORM = {
   name: '', amount: '', due_day: '1', due_day_2: '16', frequency: 'monthly',
@@ -36,13 +34,14 @@ function PeriodPayButton({ payments, month, year, period, onPay, onUnpay }) {
         paid ? 'text-green-500 hover:text-red-400' : 'text-muted-foreground hover:text-primary')}
     >
       {paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-      <span className="text-[10px]">P{period}</span>
+      <span className="text-[10px]">{period === 1 ? '1–15' : '16+'}</span>
     </button>
   )
 }
 
 export default function Bills() {
   const qc = useQueryClient()
+  const { month: MONTH, year: YEAR } = usePeriod()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -267,7 +266,7 @@ export default function Bills() {
       {/* Period 1 */}
       {p1Bills.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Period 1 — 1st to 15th</h2>
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">1st – 15th</h2>
           {p1Bills.map(b => <BillCard key={b.id} bill={b} open={!!openIds[b.id]} onToggleOpen={() => toggleOpen(b.id)} />)}
         </div>
       )}
@@ -275,7 +274,7 @@ export default function Bills() {
       {/* Period 2 */}
       {p2Bills.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Period 2 — 16th to end</h2>
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">16th – end of month</h2>
           {/* avoid duplicating biweekly bills that already appeared in P1 */}
           {p2Bills.filter(b => b.frequency !== 'biweekly' || !p1Bills.includes(b)).map(b => <BillCard key={b.id} bill={b} open={!!openIds[b.id]} onToggleOpen={() => toggleOpen(b.id)} />)}
         </div>
@@ -314,11 +313,11 @@ export default function Bills() {
               <p className="text-xs text-muted-foreground -mb-1">Creates two separate bills — one in each period — that you edit independently.</p>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label>P1 Due Day <span className="text-muted-foreground text-xs">(1–15)</span></Label>
+                  <Label>First due day <span className="text-muted-foreground text-xs">(1–15)</span></Label>
                   <Input type="number" min="1" max="15" value={form.due_day} onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>P2 Due Day <span className="text-muted-foreground text-xs">(16–31)</span></Label>
+                  <Label>Second due day <span className="text-muted-foreground text-xs">(16–31)</span></Label>
                   <Input type="number" min="16" max="31" value={form.due_day_2} onChange={e => setForm(f => ({ ...f, due_day_2: e.target.value }))} />
                 </div>
               </div>
@@ -328,7 +327,7 @@ export default function Bills() {
               <Label>Due Day</Label>
               <Input type="number" min="1" max="31" value={form.due_day} onChange={e => setForm(f => ({ ...f, due_day: e.target.value }))} />
               {form.due_day && (
-                <p className="text-xs text-muted-foreground">→ Period {getBillingPeriod(parseInt(form.due_day))}</p>
+                <p className="text-xs text-muted-foreground">→ {getBillingPeriod(parseInt(form.due_day)) === 1 ? '1st–15th' : '16th–end'}</p>
               )}
             </div>
           )}

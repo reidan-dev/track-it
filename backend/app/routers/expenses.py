@@ -4,7 +4,7 @@ from typing import Optional
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
-from app.models.expense import Expense
+from app.models.expense import Expense, ExpenseParticipantSettlement
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate, ExpenseOut
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -72,3 +72,60 @@ def delete_expense(
         raise HTTPException(status_code=404, detail="Expense not found")
     db.delete(expense)
     db.commit()
+
+
+@router.post("/{expense_id}/settle/{person_id}/{month}/{year}", response_model=ExpenseOut)
+def settle_expense_participant(
+    expense_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    expense = db.query(Expense).filter(Expense.id == expense_id, Expense.user_id == current_user.id).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    q = db.query(ExpenseParticipantSettlement).filter(
+        ExpenseParticipantSettlement.expense_id == expense_id,
+        ExpenseParticipantSettlement.person_id == person_id,
+        ExpenseParticipantSettlement.month == month,
+        ExpenseParticipantSettlement.year == year,
+    )
+    q = q.filter(ExpenseParticipantSettlement.period == period) if period is not None else q.filter(ExpenseParticipantSettlement.period.is_(None))
+    if not q.first():
+        db.add(ExpenseParticipantSettlement(
+            expense_id=expense_id, person_id=person_id, month=month, year=year, period=period,
+        ))
+        db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@router.delete("/{expense_id}/settle/{person_id}/{month}/{year}", response_model=ExpenseOut)
+def unsettle_expense_participant(
+    expense_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    expense = db.query(Expense).filter(Expense.id == expense_id, Expense.user_id == current_user.id).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    q = db.query(ExpenseParticipantSettlement).filter(
+        ExpenseParticipantSettlement.expense_id == expense_id,
+        ExpenseParticipantSettlement.person_id == person_id,
+        ExpenseParticipantSettlement.month == month,
+        ExpenseParticipantSettlement.year == year,
+    )
+    q = q.filter(ExpenseParticipantSettlement.period == period) if period is not None else q.filter(ExpenseParticipantSettlement.period.is_(None))
+    row = q.first()
+    if row:
+        db.delete(row)
+        db.commit()
+    db.refresh(expense)
+    return expense

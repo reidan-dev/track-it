@@ -41,4 +41,22 @@ class UserSettings(Base):
     reminder_loans_enabled = Column(Boolean, default=True)
     reminder_custom_enabled = Column(Boolean, default=True)
 
+    # Period-based bill reminders (Telegram)
+    bill_reminder_enabled = Column(Boolean, default=False)
+    p1_reminder_day = Column(Integer, default=1)       # day-of-month to send P1 reminder (1–15)
+    p1_reminder_time = Column(String, default="09:00")  # local time "HH:MM"
+    p2_reminder_day = Column(Integer, default=16)      # day-of-month to send P2 reminder (16–31, clamped)
+    p2_reminder_time = Column(String, default="09:00")
+    reminder_utc_offset = Column(Integer, default=8)   # user's timezone offset from UTC, in hours
+    p1_lead_prev_month = Column(Boolean, default=False)  # send P1 reminder during the previous month (advance notice)
+    p2_lead_prev_month = Column(Boolean, default=False)
+    p1_last_sent = Column(String, nullable=True)       # "YYYY-MM" of the target period-month (dedup stamp)
+    p2_last_sent = Column(String, nullable=True)
+
+    # Balance summary reminder — shares the P1/P2 schedule above, just sent as a
+    # separate Telegram message. Keeps its own dedup stamps.
+    balance_reminder_enabled = Column(Boolean, default=False)
+    balance_p1_last_sent = Column(String, nullable=True)
+    balance_p2_last_sent = Column(String, nullable=True)
+
     user = relationship("User", back_populates="settings")

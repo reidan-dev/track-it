@@ -6,7 +6,7 @@ from decimal import Decimal
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
-from app.models.expense import Expense
+from app.models.expense import Expense, ExpenseParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment
 from app.models.bill import Bill, BillPayment
 from app.models.loan import Loan
@@ -65,11 +65,12 @@ def get_summary(
         Income.year == y,
     ).scalar() or Decimal(0)
 
-    total_expenses = db.query(func.sum(Expense.amount)).filter(
+    month_expenses = db.query(Expense).filter(
         Expense.user_id == current_user.id,
         Expense.month == m,
         Expense.year == y,
-    ).scalar() or Decimal(0)
+    ).all()
+    total_expenses = sum((e.amount for e in month_expenses), Decimal(0))
 
     expenses_by_category = db.query(
         Expense.category,
@@ -149,9 +150,8 @@ def get_summary(
 
     net_position = float(total_income - total_expenses - total_installments - total_bills)
 
-    # Net cash considering only MY share of bills/installments (others' shares
-    # are reimbursed to me, so they shouldn't count against my cash). Expenses
-    # are always fully mine.
+    # Net cash considering only MY share of bills/installments/expenses (others'
+    # shares are reimbursed to me, so they shouldn't count against my cash).
     my_bills_total = sum(
         _my_share(b.amount, b.participants, b.participant_amounts) for b in active_bills
     )
@@ -159,7 +159,15 @@ def get_summary(
         _my_share(i.installment_amount, i.participants, i.participant_amounts)
         for i in active_installments
     )
-    net_cash_mine = float(total_income) - float(total_expenses) - my_installments_total - my_bills_total
+
+    def _my_expense_cost(exp):
+        parts = exp.participants or []
+        non_me = [p for p in parts if p != ME_ID]
+        others = sum(_participant_share(exp.amount, parts, exp.participant_amounts, pid) for pid in non_me)
+        return max(0.0, float(exp.amount) - others)
+
+    my_expenses_total = sum(_my_expense_cost(e) for e in month_expenses)
+    net_cash_mine = float(total_income) - my_expenses_total - my_installments_total - my_bills_total
 
     # ── Per-person balances ──────────────────────────────────────────────────
     people = db.query(Person).filter(Person.user_id == current_user.id).all()
@@ -168,17 +176,19 @@ def get_summary(
     # pid → {"sources": [{type, label, amount, period, direction}]}
     bal: dict[int, dict] = {}
 
-    def _add(pid, direction, type_, label, amount, period):
+    def _add(pid, direction, type_, label, amount, period, **extra):
         # direction: "owed_to_me" | "i_owe"; period: 1, 2, or None
         if pid not in people_map or amount is None or amount <= 0:
             return
-        bal.setdefault(pid, {"sources": []})["sources"].append({
+        src = {
             "type": type_,
             "label": label,
             "amount": round(float(amount), 2),
             "period": period,
             "direction": direction,
-        })
+        }
+        src.update(extra)
+        bal.setdefault(pid, {"sources": []})["sources"].append(src)
 
     # 1. Loans — total remaining balance (no period)
     for loan in all_active_loans:
@@ -204,6 +214,7 @@ def get_summary(
     for bill in active_bills:
         parts = bill.participants or []
         non_me = [p for p in parts if p != ME_ID]
+        split = len(non_me) > 0
         periods = [1, 2] if bill.frequency == "biweekly" else [_period_of(bill.due_day)]
         for period in periods:
             paid_check = period if bill.frequency == "biweekly" else None
@@ -212,11 +223,11 @@ def get_summary(
             # other participants owe me their share
             for pid in non_me:
                 share = _participant_share(bill.amount, parts, bill.participant_amounts, pid)
-                _add(pid, "owed_to_me", "bill", bill.name, share, period)
+                _add(pid, "owed_to_me", "bill", bill.name, share, period, split=split)
             # i owe the payee my share
             if bill.payable_to:
                 ms = _my_share(bill.amount, parts, bill.participant_amounts)
-                _add(bill.payable_to, "i_owe", "bill", bill.name, ms, period)
+                _add(bill.payable_to, "i_owe", "bill", bill.name, ms, period, split=split)
 
     # 3. Installments this month — other participants' unpaid shares
     inst_payments_this_month = db.query(InstallmentPayment).filter(
@@ -235,6 +246,7 @@ def get_summary(
         non_me = [p for p in parts if p != ME_ID]
         if not non_me:
             continue
+        term = min((inst.terms_paid or 0) + 1, inst.total_terms)
         periods = [1, 2] if inst.frequency == "biweekly" else [_period_of(inst.due_day)]
         for period in periods:
             paid_check = period if inst.frequency == "biweekly" else None
@@ -242,7 +254,28 @@ def get_summary(
                 continue
             for pid in non_me:
                 share = _participant_share(inst.installment_amount, parts, inst.participant_amounts, pid)
-                _add(pid, "owed_to_me", "installment", inst.name, share, period)
+                _add(pid, "owed_to_me", "installment", inst.name, share, period,
+                     term=term, total_terms=inst.total_terms, split=True)
+
+    # 4. Expenses this month — others' unsettled shares
+    exp_settled = {
+        (s.expense_id, s.person_id) for s in db.query(ExpenseParticipantSettlement).filter(
+            ExpenseParticipantSettlement.expense_id.in_([e.id for e in month_expenses]),
+            ExpenseParticipantSettlement.month == m, ExpenseParticipantSettlement.year == y,
+        ).all()
+    } if month_expenses else set()
+
+    for exp in month_expenses:
+        parts = exp.participants or []
+        non_me = [p for p in parts if p != ME_ID]
+        if not non_me:
+            continue
+        label = exp.name or exp.note or exp.category
+        for pid in non_me:
+            if (exp.id, pid) in exp_settled:
+                continue
+            share = _participant_share(exp.amount, parts, exp.participant_amounts, pid)
+            _add(pid, "owed_to_me", "expense", label, share, exp.period, split=True)
 
     people_balances = []
     for pid, b in bal.items():

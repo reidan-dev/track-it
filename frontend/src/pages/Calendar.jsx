@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { usePeriod } from '@/contexts/PeriodContext'
 import { getCalendarEvents } from '@/api/dashboard'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Badge } from '@/components/shared/Badge'
@@ -12,6 +13,7 @@ const TYPE_COLORS = {
   installment: 'text-orange-500',
   loan: 'text-red-500',
   income: 'text-green-500',
+  expense: 'text-violet-500',
 }
 
 const TYPE_BADGE = {
@@ -19,7 +21,10 @@ const TYPE_BADGE = {
   installment: 'warning',
   loan: 'danger',
   income: 'success',
+  expense: 'muted',
 }
+
+const TYPES = ['bill', 'installment', 'expense', 'loan', 'income']
 
 function getDaysInMonth(month, year) {
   return new Date(year, month, 0).getDate()
@@ -30,11 +35,10 @@ function getFirstDayOfMonth(month, year) {
 }
 
 export default function CalendarPage() {
+  const { month, year } = usePeriod()
   const now = new Date()
-  const [month, setMonth] = useState(now.getMonth() + 1)
-  const [year, setYear] = useState(now.getFullYear())
   const [selectedDay, setSelectedDay] = useState(null)
-  const [visibleTypes, setVisibleTypes] = useState(new Set(['bill', 'installment', 'loan', 'income']))
+  const [visibleTypes, setVisibleTypes] = useState(new Set(TYPES))
 
   const { data } = useQuery({
     queryKey: ['calendar', month, year],
@@ -56,9 +60,6 @@ export default function CalendarPage() {
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1)
   const blanks = Array.from({ length: firstDay }, (_, i) => i)
 
-  const prev = () => { if (month === 1) { setMonth(12); setYear(y => y - 1) } else setMonth(m => m - 1) }
-  const next = () => { if (month === 12) { setMonth(1); setYear(y => y + 1) } else setMonth(m => m + 1) }
-
   const toggleType = (t) => {
     setVisibleTypes(prev => {
       const s = new Set(prev)
@@ -71,24 +72,16 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold flex items-center gap-1.5">Calendar <HelpTip text="A month view of when bills, installments, and income fall due." /></h1>
-        <div className="flex items-center gap-2">
-          <button onClick={prev} className="p-1.5 rounded hover:bg-accent"><ChevronLeft className="w-4 h-4" /></button>
-          <span className="text-sm font-medium min-w-[140px] text-center">
-            {new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
-          </span>
-          <button onClick={next} className="p-1.5 rounded hover:bg-accent"><ChevronRight className="w-4 h-4" /></button>
-        </div>
-      </div>
+      <h1 className="text-2xl font-bold flex items-center gap-1.5">Calendar <HelpTip text="A month view of when bills, installments, expenses, loans, and income fall due — with a marker for what others owe you." /></h1>
 
       {/* Type toggles */}
       <div className="flex gap-2 flex-wrap">
-        {['bill', 'installment', 'loan', 'income'].map(t => (
+        {TYPES.map(t => (
           <button key={t} onClick={() => toggleType(t)}
             className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${visibleTypes.has(t) ? 'border-transparent' : 'border-border bg-transparent opacity-40'}
               ${t === 'bill' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : ''}
               ${t === 'installment' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : ''}
+              ${t === 'expense' ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400' : ''}
               ${t === 'loan' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : ''}
               ${t === 'income' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : ''}
             `}
@@ -120,7 +113,7 @@ export default function CalendarPage() {
               <div className="mt-0.5 space-y-0.5">
                 {dayEvents.slice(0, 3).map((e, i) => (
                   <div key={i} className={`text-[10px] truncate ${TYPE_COLORS[e.type]}`}>
-                    {e.name || e.direction} {e.paid && '✓'}
+                    {e.owed_to_me > 0 && <span className="text-green-500" title="Someone owes you">●</span>} {e.name || e.direction} {e.paid && '✓'}
                   </div>
                 ))}
                 {dayEvents.length > 3 && <div className="text-[10px] text-muted-foreground">+{dayEvents.length - 3}</div>}
@@ -142,13 +135,16 @@ export default function CalendarPage() {
             ) : (
               <ul className="space-y-2">
                 {selectedEvents.map((e, i) => (
-                  <li key={i} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
+                  <li key={i} className="flex items-center justify-between text-sm gap-2">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
                       <Badge variant={TYPE_BADGE[e.type]}>{e.type}</Badge>
-                      <span>{e.name || e.direction}</span>
+                      <span className="truncate">{e.name || e.direction}</span>
                       {e.paid && <span className="text-green-500 text-xs">paid</span>}
+                      {e.owed_to_me > 0 && (
+                        <span className="text-xs text-green-600 dark:text-green-400 shrink-0">· {formatCurrency(e.owed_to_me)} owed to you</span>
+                      )}
                     </div>
-                    <span className="font-medium">{formatCurrency(e.amount)}</span>
+                    <span className="font-medium shrink-0">{formatCurrency(e.amount)}</span>
                   </li>
                 ))}
               </ul>

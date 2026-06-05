@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from datetime import date
+from calendar import monthrange
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
@@ -8,8 +9,18 @@ from app.models.installment import Installment, InstallmentPayment
 from app.models.bill import Bill, BillPayment
 from app.models.loan import Loan
 from app.models.income import Income
+from app.models.expense import Expense
+from app.finance import ME_ID, participant_share
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
+
+
+def _owed_to_me(amount, participants, participant_amounts):
+    """(amount others owe me, is_split) for a shared entry."""
+    parts = participants or []
+    non_me = [p for p in parts if p != ME_ID]
+    owed = sum(participant_share(amount, parts, participant_amounts, pid) for pid in non_me)
+    return round(owed, 2), len(non_me) > 0
 
 
 @router.get("/events")
@@ -20,6 +31,7 @@ def get_calendar_events(
     db: Session = Depends(get_db),
 ):
     events = []
+    dim = monthrange(year, month)[1]  # days in this month
 
     bills = db.query(Bill).filter(
         Bill.user_id == current_user.id,
@@ -34,14 +46,17 @@ def get_calendar_events(
         ).all()
     }
     for bill in bills:
-        due_day = min(bill.due_day, 28)
+        owed, split = _owed_to_me(bill.amount, bill.participants, bill.participant_amounts)
+        day = min(max(int(bill.due_day or 1), 1), dim)
         events.append({
             "type": "bill",
             "id": bill.id,
             "name": bill.name,
             "amount": float(bill.amount) if bill.amount is not None else 0,
-            "date": date(year, month, due_day).isoformat(),
+            "date": date(year, month, day).isoformat(),
             "paid": bill.id in paid_bill_ids,
+            "owed_to_me": owed,
+            "split": split,
         })
 
     installments = db.query(Installment).filter(
@@ -56,14 +71,21 @@ def get_calendar_events(
         ).all()
     }
     for inst in installments:
-        events.append({
-            "type": "installment",
-            "id": inst.id,
-            "name": inst.name,
-            "amount": float(inst.installment_amount),
-            "date": date(year, month, 1).isoformat(),
-            "paid": inst.id in paid_inst_ids,
-        })
+        owed, split = _owed_to_me(inst.installment_amount, inst.participants, inst.participant_amounts)
+        days = [min(int(p.strip()), dim) for p in str(inst.due_day or "").split(",") if p.strip().isdigit()]
+        if not days:
+            days = [1]
+        for d in days:
+            events.append({
+                "type": "installment",
+                "id": inst.id,
+                "name": inst.name,
+                "amount": float(inst.installment_amount),
+                "date": date(year, month, max(d, 1)).isoformat(),
+                "paid": inst.id in paid_inst_ids,
+                "owed_to_me": owed,
+                "split": split,
+            })
 
     active_loans = db.query(Loan).filter(
         Loan.user_id == current_user.id,
@@ -71,13 +93,34 @@ def get_calendar_events(
         Loan.total_terms != None,
     ).all()
     for loan in active_loans:
+        amt = float(loan.principal / loan.total_terms) if loan.total_terms else 0
         events.append({
             "type": "loan",
             "id": loan.id,
             "direction": loan.direction,
-            "amount": float(loan.principal / loan.total_terms) if loan.total_terms else 0,
+            "amount": amt,
             "date": date(year, month, 1).isoformat(),
             "paid": False,
+            "owed_to_me": amt if loan.direction == "lent" else 0,
+            "split": False,
+        })
+
+    expenses = db.query(Expense).filter(
+        Expense.user_id == current_user.id,
+        Expense.month == month,
+        Expense.year == year,
+    ).all()
+    for exp in expenses:
+        owed, split = _owed_to_me(exp.amount, exp.participants, exp.participant_amounts)
+        events.append({
+            "type": "expense",
+            "id": exp.id,
+            "name": exp.name or exp.note or exp.category,
+            "amount": float(exp.amount),
+            "date": exp.date.isoformat(),
+            "paid": True,
+            "owed_to_me": owed,
+            "split": split,
         })
 
     incomes = db.query(Income).filter(
@@ -93,6 +136,8 @@ def get_calendar_events(
             "amount": float(inc.amount),
             "date": inc.date.isoformat(),
             "paid": True,
+            "owed_to_me": 0,
+            "split": False,
         })
 
     return {"month": month, "year": year, "events": events}

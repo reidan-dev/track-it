@@ -33,6 +33,15 @@ class UserSettingsOut(BaseModel):
     reminder_installments_enabled: bool
     reminder_loans_enabled: bool
     reminder_custom_enabled: bool
+    bill_reminder_enabled: Optional[bool] = False
+    p1_reminder_day: Optional[int] = 1
+    p1_reminder_time: Optional[str] = "09:00"
+    p2_reminder_day: Optional[int] = 16
+    p2_reminder_time: Optional[str] = "09:00"
+    reminder_utc_offset: Optional[int] = 8
+    p1_lead_prev_month: Optional[bool] = False
+    p2_lead_prev_month: Optional[bool] = False
+    balance_reminder_enabled: Optional[bool] = False
 
     class Config:
         from_attributes = True
@@ -50,5 +59,14 @@ class UserSettingsUpdate(BaseModel):
     reminder_installments_enabled: Optional[bool] = None
     reminder_loans_enabled: Optional[bool] = None
     reminder_custom_enabled: Optional[bool] = None
+    bill_reminder_enabled: Optional[bool] = None
+    p1_reminder_day: Optional[int] = None
+    p1_reminder_time: Optional[str] = None
+    p2_reminder_day: Optional[int] = None
+    p2_reminder_time: Optional[str] = None
+    reminder_utc_offset: Optional[int] = None
+    p1_lead_prev_month: Optional[bool] = None
+    p2_lead_prev_month: Optional[bool] = None
+    balance_reminder_enabled: Optional[bool] = None
     currency: Optional[str] = None
     theme: Optional[str] = None

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { HelpTip } from '@/components/shared/HelpTip'
+import { usePeriod } from '@/contexts/PeriodContext'
 import { getIncome, createIncome, updateIncome, deleteIncome } from '@/api/income'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
@@ -15,8 +16,7 @@ const EMPTY_FORM = { source: '', amount: '', date: now.toISOString().slice(0, 10
 
 export default function Income() {
   const qc = useQueryClient()
-  const [month, setMonth] = useState(now.getMonth() + 1)
-  const [year, setYear] = useState(now.getFullYear())
+  const { month, year } = usePeriod()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -64,19 +64,10 @@ export default function Income() {
         </Button>
       </div>
 
-      <div className="flex gap-3 items-center">
-        <Select value={month} onChange={e => setMonth(Number(e.target.value))} className="w-36">
-          {Array.from({ length: 12 }, (_, i) => (
-            <option key={i + 1} value={i + 1}>{new Date(2024, i).toLocaleString('default', { month: 'long' })}</option>
-          ))}
-        </Select>
-        <Input type="number" value={year} onChange={e => setYear(Number(e.target.value))} className="w-24" />
-      </div>
-
       <div className="grid grid-cols-3 gap-4">
         <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold text-green-500">{formatCurrency(total)}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Period 1 (1–15)</p><p className="text-lg font-semibold">{formatCurrency(p1)}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Period 2 (16–end)</p><p className="text-lg font-semibold">{formatCurrency(p2)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">1st–15th</p><p className="text-lg font-semibold">{formatCurrency(p1)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">16th–end</p><p className="text-lg font-semibold">{formatCurrency(p2)}</p></CardContent></Card>
       </div>
 
       <div className="space-y-2">
@@ -88,7 +79,7 @@ export default function Income() {
                 <p className="font-medium text-sm">{e.source}</p>
                 <div className="flex gap-2 mt-0.5">
                   <Badge variant="success">{e.type}</Badge>
-                  <span className="text-xs text-muted-foreground">{e.date} · P{e.period}</span>
+                  <span className="text-xs text-muted-foreground">{e.date}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">

@@ -53,7 +53,6 @@ export function SplitTracker({ entry, amount, people, month, year, onToggle }) {
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Who paid their share</p>
       {periods.map(period => (
         <div key={period ?? 'm'} className="flex items-center gap-1.5 flex-wrap">
-          {biweekly && <span className="text-[10px] text-muted-foreground w-4 shrink-0">P{period}</span>}
           {participants.map(pid => {
             const settled = isSettled(pid, period)
             const share = shareOf(amount, participants, entry.participant_amounts, pid)
