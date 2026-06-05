@@ -93,73 +93,103 @@ Frontend runs at: `http://localhost:5173`
 
 ---
 
-## Production Deployment
+## Production Deployment (Railway + Vercel)
 
-### Overview
+### Architecture
 
-| Service | What it hosts |
-|---|---|
-| **Vercel** | React frontend |
-| **Railway** | FastAPI backend + PostgreSQL database |
+| Service | Hosts | Notes |
+|---|---|---|
+| **Supabase** | PostgreSQL database | Already provisioned — reuse its connection string |
+| **Railway** | FastAPI backend | Always-on (needed for the reminder scheduler) |
+| **Vercel** | React/Vite frontend | Static build, auto-deploys on push |
 
----
-
-### Backend → Railway
-
-1. Go to [railway.app](https://railway.app) and create a new project
-2. Add a **PostgreSQL** database service — Railway provisions it automatically
-3. Add a second service from your GitHub repo (the `backend/` folder)
-4. Set the root directory to `backend` in Railway's service settings
-5. Set the start command:
-   ```
-   uvicorn app.main:app --host 0.0.0.0 --port $PORT
-   ```
-6. Add environment variables in Railway's dashboard:
-   ```
-   DATABASE_URL        → (copy from the Railway PostgreSQL service)
-   SECRET_KEY          → (generate: python -c "import secrets; print(secrets.token_hex(32))")
-   ALGORITHM           → HS256
-   ACCESS_TOKEN_EXPIRE_MINUTES → 60
-   REFRESH_TOKEN_EXPIRE_DAYS   → 30
-   ALLOWED_ORIGINS     → https://your-app.vercel.app
-   ```
-7. Deploy — Railway builds and runs automatically on push to main
-8. Note the public Railway URL (e.g. `https://track-it-backend.up.railway.app`)
-
-Run migrations on Railway after first deploy:
-
-```bash
-railway run alembic upgrade head
-railway run python scripts/seed_user.py --email you@example.com --password yourpassword
-```
+> **Deploy order matters.** The frontend needs the backend's URL (`VITE_API_URL`), and the backend needs the frontend's URL (`ALLOWED_ORIGINS`). So: **deploy the backend first**, deploy the frontend with the backend URL, then come back and set the backend's `ALLOWED_ORIGINS` to the Vercel URL.
 
 ---
 
-### Frontend → Vercel
+### Step 1 — Grab the database URL (Supabase, already set up)
 
-1. Go to [vercel.com](https://vercel.com) and import your GitHub repo
-2. Set the **Root Directory** to `frontend`
-3. Framework preset: **Vite**
-4. Add environment variable:
+The database already lives on Supabase — nothing to provision. Just copy its connection string for the backend:
+
+1. Supabase dashboard → **Project Settings → Database → Connection string → URI**.
+2. Use the **direct connection** (port `5432`). It looks like:
    ```
-   VITE_API_URL=https://your-railway-backend-url.up.railway.app
+   postgresql://postgres.<ref>:<password>@aws-1-<region>.pooler.supabase.com:5432/postgres
    ```
-5. Deploy — Vercel builds automatically on push to main
+3. Keep it handy — it's the `DATABASE_URL` in Step 2.
 
 ---
 
-### CORS Setup
+### Step 2 — Deploy the backend (Railway)
 
-In your FastAPI `main.py`, set `ALLOWED_ORIGINS` to your Vercel domain:
+1. Go to [railway.app](https://railway.app), sign in with GitHub, click **New Project → Deploy from GitHub repo**, and pick your `track-it` repo (authorize access if prompted).
+2. Open the new service → **Settings**:
+   - **Root Directory**: `backend`
+   - **Start Command**:
+     ```
+     alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+     ```
+     (This runs DB migrations automatically on every deploy, then starts the API. Railway injects `$PORT`.)
+   - *(Optional)* **Healthcheck Path**: `/health`
+3. Go to the service's **Variables** tab and add:
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | Your Supabase connection string from Step 1 |
+   | `SECRET_KEY` | A long random string — generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
+   | `ALGORITHM` | `HS256` |
+   | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` |
+   | `REFRESH_TOKEN_EXPIRE_DAYS` | `30` |
+   | `ALLOWED_ORIGINS` | `http://localhost:5173` for now — you'll add the Vercel URL in Step 4 |
+4. Railway auto-deploys (Railpack detects Python from `requirements.txt`). The repo includes **`backend/.python-version` pinned to `3.12`** — keep it: Python 3.13 has no prebuilt wheel for this `pydantic` version and the build fails trying to compile Rust.
+5. Under **Settings → Networking**, click **Generate Domain**. Note the URL, e.g. `https://track-it-backend.up.railway.app`.
+6. Confirm it's live: open `https://<your-backend>.up.railway.app/health` → should return `{"status":"ok"}`. API docs are at `/docs`.
 
-```python
-origins = [
-    "http://localhost:5173",
-    "https://your-app.vercel.app",
-]
-```
+> Your Supabase DB is already migrated and has a user from development, so there's nothing else to run. **Only if you ever point at a fresh database**, seed a user once with the [Railway CLI](https://docs.railway.app/guides/cli) from `backend/`:
+>
+> ```bash
+> railway link        # select the project + backend service
+> railway run python scripts/seed_user.py --email you@example.com --password yourpassword
+> ```
+> (Migrations apply automatically via the start command.)
 
-Update this env var on Railway whenever your Vercel domain changes.
+---
+
+### Step 3 — Deploy the frontend (Vercel)
+
+1. Go to [vercel.com](https://vercel.com), **Add New → Project**, and import your `track-it` repo.
+2. In the import screen:
+   - **Root Directory**: `frontend`
+   - **Framework Preset**: **Vite** (auto-detected; build = `npm run build`, output = `dist`)
+3. Expand **Environment Variables** and add:
+   ```
+   VITE_API_URL = https://<your-backend>.up.railway.app
+   ```
+   (No trailing slash. This is baked in at build time, so changing it later requires a redeploy.)
+4. Click **Deploy**. When it finishes, note your Vercel URL, e.g. `https://track-it.vercel.app`.
+
+---
+
+### Step 4 — Connect them (CORS)
+
+The backend reads allowed origins from the `ALLOWED_ORIGINS` env var (comma-separated) — no code change needed.
+
+1. Back in Railway → backend service → **Variables**, set:
+   ```
+   ALLOWED_ORIGINS = https://track-it.vercel.app
+   ```
+   To also allow Vercel preview deployments, add them comma-separated, e.g.
+   `https://track-it.vercel.app,https://track-it-git-main-you.vercel.app`
+2. Save — Railway redeploys automatically.
+
+---
+
+### Step 5 — Verify
+
+1. Open your Vercel URL and log in with the seeded account.
+2. If requests fail, open the browser devtools **Network** tab:
+   - **CORS error** → `ALLOWED_ORIGINS` doesn't exactly match the Vercel domain (check `https://`, no trailing slash).
+   - **404/Network error** → `VITE_API_URL` is wrong; fix it in Vercel and **redeploy** (it's build-time).
+3. *(Optional)* In the app, go to **Settings → General** to add your Telegram bot token/chat ID, then **Settings → Reminders** to schedule reminders. These fire from the always-on Railway backend.
 
 ---
 
@@ -213,7 +243,8 @@ cd frontend && npm run preview
 ```bash
 # Push to main — both Vercel and Railway auto-deploy on push
 git push origin main
-
-# If you have schema changes, run migrations after Railway redeploys:
-railway run alembic upgrade head
 ```
+
+- **Schema changes** apply automatically: the Railway start command runs `alembic upgrade head` on every deploy.
+- **Frontend env changes** (`VITE_API_URL`) are build-time — after changing them in Vercel, trigger a redeploy.
+- **CORS**: whenever the Vercel domain changes, update `ALLOWED_ORIGINS` on Railway.
