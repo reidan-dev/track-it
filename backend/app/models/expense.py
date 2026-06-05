@@ -20,9 +20,14 @@ class Expense(Base):
     year = Column(Integer, nullable=False)
     participants = Column(JSON, default=list)        # person ids sharing the cost; 0 = Me
     participant_amounts = Column(JSON, default=dict)  # optional custom per-person split
+    receipt_image = Column(Text, nullable=True)      # base64 data URL of an attached receipt photo
 
     user = relationship("User", back_populates="expenses")
     settlements = relationship("ExpenseParticipantSettlement", back_populates="expense", cascade="all, delete-orphan")
+
+    @property
+    def has_receipt(self) -> bool:
+        return self.receipt_image is not None
 
 
 class ExpenseParticipantSettlement(Base):

@@ -44,6 +44,20 @@ def create_expense(
     return expense
 
 
+@router.get("/{expense_id}/receipt")
+def get_expense_receipt(
+    expense_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    expense = db.query(Expense).filter(Expense.id == expense_id, Expense.user_id == current_user.id).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if not expense.receipt_image:
+        raise HTTPException(status_code=404, detail="No receipt attached")
+    return {"receipt_image": expense.receipt_image}
+
+
 @router.put("/{expense_id}", response_model=ExpenseOut)
 def update_expense(
     expense_id: int,

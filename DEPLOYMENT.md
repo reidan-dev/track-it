@@ -127,10 +127,11 @@ The database already lives on Supabase — nothing to provision. Just copy its c
    - **Root Directory**: `backend`
    - **Start Command**:
      ```
-     alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+     uvicorn app.main:app --host 0.0.0.0 --port $PORT
      ```
-     (This runs DB migrations automatically on every deploy, then starts the API. Railway injects `$PORT`.)
+     (Railway injects `$PORT`.) Keep migrations *out* of the start command — if the DB is briefly unreachable, a migration step there blocks boot and the healthcheck fails with no obvious reason.
    - *(Optional)* **Healthcheck Path**: `/health`
+   - *(Optional)* **Pre-Deploy Command** (runs before the new version goes live): `alembic upgrade head` — use this when you have new migrations. Your Supabase DB is already migrated, so you can leave it blank for now.
 3. Go to the service's **Variables** tab and add:
    | Variable | Value |
    |---|---|
@@ -245,6 +246,6 @@ cd frontend && npm run preview
 git push origin main
 ```
 
-- **Schema changes** apply automatically: the Railway start command runs `alembic upgrade head` on every deploy.
+- **Schema changes**: run `alembic upgrade head` — either set it as Railway's **Pre-Deploy Command**, or run `railway run alembic upgrade head` once after the deploy. (Keep it out of the start command so a DB hiccup can't block boot.)
 - **Frontend env changes** (`VITE_API_URL`) are build-time — after changing them in Vercel, trigger a redeploy.
 - **CORS**: whenever the Vercel domain changes, update `ALLOWED_ORIGINS` on Railway.
