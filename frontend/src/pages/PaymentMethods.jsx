@@ -161,7 +161,7 @@ export default function PaymentMethods({ embedded = false }) {
         ))}
       </div>
 
-      <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Payment Method' : 'Add Payment Method'} className="max-w-md"
+      <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Payment Method' : 'Add Payment Method'} className="sm:max-w-md"
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>

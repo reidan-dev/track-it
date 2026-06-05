@@ -10,6 +10,8 @@ import { Modal } from '@/components/shared/Modal'
 import { formatCurrency } from '@/lib/utils'
 import { TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronUp, ImageDown, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PullToRefresh } from '@/components/shared/PullToRefresh'
+import { useMonthSwipe } from '@/hooks/useMonthSwipe'
 
 const SOURCE_LABELS = { loan: 'Loan', bill: 'Bill', installment: 'Installment', expense: 'Expense' }
 
@@ -180,10 +182,11 @@ export default function Summary() {
   const [imagePeriod, setImagePeriod] = useState('all')
   const [selected, setSelected] = useState(new Set())
   const [copyMsg, setCopyMsg] = useState('')
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['dashboard', month, year],
     queryFn: () => getDashboardSummary(month, year).then(r => r.data),
   })
+  const swipe = useMonthSwipe()
 
   if (isLoading) return <div className="text-muted-foreground">Loading…</div>
   if (!data) return null
@@ -272,7 +275,8 @@ export default function Summary() {
   }
 
   return (
-    <div className="space-y-6">
+    <PullToRefresh onRefresh={refetch}>
+    <div {...swipe()} style={{ touchAction: 'pan-y' }} className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-1.5">Summary <HelpTip text="This month at a glance: your net cash, category totals, who owes you (and whom you owe), and what's due in the next 7 days." /></h1>
         <p className="text-muted-foreground text-sm">
@@ -466,5 +470,6 @@ export default function Summary() {
         </div>
       </Modal>
     </div>
+    </PullToRefresh>
   )
 }

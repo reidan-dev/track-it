@@ -9,6 +9,7 @@ import { Badge } from '@/components/shared/Badge'
 import { cn } from '@/lib/utils'
 import People from '@/pages/People'
 import PaymentMethods from '@/pages/PaymentMethods'
+import { SecuritySettings } from '@/components/shared/SecuritySettings'
 
 const CURRENCIES = ['PHP', 'USD', 'EUR', 'JPY', 'SGD']
 const THEMES = ['system', 'light', 'dark']
@@ -16,6 +17,7 @@ const MODULES = ['expenses', 'bills', 'installments', 'loans', 'income']
 const TABS = [
   { id: 'general', label: 'General' },
   { id: 'reminders', label: 'Reminders' },
+  { id: 'security', label: 'Security' },
   { id: 'people', label: 'People' },
   { id: 'methods', label: 'Pay Methods' },
 ]
@@ -137,13 +139,13 @@ export default function Settings() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold flex items-center gap-1.5">Settings <HelpTip text="Preferences, Telegram reminders, data export, plus managing People and payment methods." /></h1>
 
-      <div className="flex gap-1 border-b border-border">
+      <div className="flex gap-1 border-b border-border overflow-x-auto no-scrollbar">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              'px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors',
+              'px-3 py-2 text-sm font-medium -mb-px border-b-2 transition-colors whitespace-nowrap shrink-0',
               tab === t.id
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -156,6 +158,7 @@ export default function Settings() {
 
       {tab === 'people' && <People embedded />}
       {tab === 'methods' && <PaymentMethods embedded />}
+      {tab === 'security' && <SecuritySettings />}
 
       {tab === 'reminders' && (
       <div className="space-y-6">

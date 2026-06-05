@@ -280,7 +280,7 @@ export default function Bills() {
         </div>
       )}
 
-      <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Bill' : 'Add Bill'} className="max-w-lg"
+      <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Bill' : 'Add Bill'} className="sm:max-w-lg"
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>

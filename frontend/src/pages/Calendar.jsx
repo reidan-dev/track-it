@@ -6,7 +6,8 @@ import { getCalendarEvents } from '@/api/dashboard'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Badge } from '@/components/shared/Badge'
 import { formatCurrency } from '@/lib/utils'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { PullToRefresh } from '@/components/shared/PullToRefresh'
+import { useMonthSwipe } from '@/hooks/useMonthSwipe'
 
 const TYPE_COLORS = {
   bill: 'text-blue-500',
@@ -40,10 +41,11 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState(null)
   const [visibleTypes, setVisibleTypes] = useState(new Set(TYPES))
 
-  const { data } = useQuery({
+  const { data, refetch } = useQuery({
     queryKey: ['calendar', month, year],
     queryFn: () => getCalendarEvents(month, year).then(r => r.data),
   })
+  const swipe = useMonthSwipe()
 
   const events = data?.events || []
 
@@ -71,7 +73,8 @@ export default function CalendarPage() {
   const selectedEvents = selectedDay ? (eventsByDay[selectedDay] || []) : []
 
   return (
-    <div className="space-y-6">
+    <PullToRefresh onRefresh={refetch}>
+    <div {...swipe()} style={{ touchAction: 'pan-y' }} className="space-y-6">
       <h1 className="text-2xl font-bold flex items-center gap-1.5">Calendar <HelpTip text="A month view of when bills, installments, expenses, loans, and income fall due — with a marker for what others owe you." /></h1>
 
       {/* Type toggles */}
@@ -91,8 +94,47 @@ export default function CalendarPage() {
         ))}
       </div>
 
-      {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-1">
+      {/* Agenda list — mobile only */}
+      <div className="md:hidden space-y-3">
+        {days.filter(d => (eventsByDay[d] || []).length > 0).length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">Nothing scheduled this month.</p>
+        ) : (
+          days.filter(d => (eventsByDay[d] || []).length > 0).map(day => {
+            const dayEvents = eventsByDay[day]
+            const isToday = day === now.getDate() && month === now.getMonth() + 1 && year === now.getFullYear()
+            return (
+              <div key={day}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`text-sm font-semibold ${isToday ? 'text-primary' : ''}`}>
+                    {new Date(year, month - 1, day).toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </span>
+                  {isToday && <Badge variant="default">Today</Badge>}
+                </div>
+                <Card>
+                  <CardContent className="py-1 divide-y divide-border">
+                    {dayEvents.map((e, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 py-2.5 text-sm">
+                        <div className="flex items-center gap-2 flex-wrap min-w-0">
+                          <Badge variant={TYPE_BADGE[e.type]}>{e.type}</Badge>
+                          <span className="truncate">{e.name || e.direction}</span>
+                          {e.paid && <span className="text-green-500 text-xs">paid</span>}
+                          {e.owed_to_me > 0 && (
+                            <span className="text-xs text-green-600 dark:text-green-400 shrink-0">· {formatCurrency(e.owed_to_me)} owed</span>
+                          )}
+                        </div>
+                        <span className="font-medium shrink-0">{formatCurrency(e.amount)}</span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Calendar grid — desktop */}
+      <div className="hidden md:grid grid-cols-7 gap-1">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
           <div key={d} className="text-center text-xs text-muted-foreground py-1 font-medium">{d}</div>
         ))}
@@ -153,5 +195,6 @@ export default function CalendarPage() {
         </Card>
       )}
     </div>
+    </PullToRefresh>
   )
 }

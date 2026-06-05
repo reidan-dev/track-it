@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { PeriodProvider } from '@/contexts/PeriodContext'
 import Layout from '@/components/layout/Layout'
+import { InstallPrompt } from '@/components/shared/InstallPrompt'
+import { LockGate } from '@/components/shared/LockGate'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import Summary from '@/pages/Summary'
@@ -15,13 +17,13 @@ import Settings from '@/pages/Settings'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth()
-  return isAuthenticated ? <Layout>{children}</Layout> : <Navigate to="/login" replace />
+  return isAuthenticated ? <Layout>{children}<InstallPrompt /></Layout> : <Navigate to="/login" replace />
 }
 
-export default function App() {
+function AppRoutes() {
+  const { isAuthenticated } = useAuth()
   return (
-    <PeriodProvider>
-    <BrowserRouter>
+    <LockGate active={isAuthenticated}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
@@ -35,6 +37,15 @@ export default function App() {
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
+    </LockGate>
+  )
+}
+
+export default function App() {
+  return (
+    <PeriodProvider>
+    <BrowserRouter>
+      <AppRoutes />
     </BrowserRouter>
     </PeriodProvider>
   )

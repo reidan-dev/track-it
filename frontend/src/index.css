@@ -49,12 +49,60 @@
   * {
     @apply border-border;
   }
+  html {
+    /* Prevent iOS text auto-zoom oddities; respect notches */
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* No accidental horizontal scroll on phones */
+    overflow-x: hidden;
+    /* Kill the grey tap flash on mobile */
+    -webkit-tap-highlight-color: transparent;
   }
+}
+
+@layer utilities {
+  /* Safe-area helpers for notch / home indicator (used with viewport-fit=cover) */
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pl-safe { padding-left: env(safe-area-inset-left); }
+  .pr-safe { padding-right: env(safe-area-inset-right); }
+  .min-h-screen-safe {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  /* Momentum scrolling for inner scroll regions on iOS */
+  .scroll-touch { -webkit-overflow-scrolling: touch; }
+  /* Hide scrollbars on horizontal chip strips while keeping scroll */
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 }
 
 * {
   transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Bottom-sheet slide-up animation (mobile modals) */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.animate-sheet-up { animation: sheet-up 0.22s cubic-bezier(0.32, 0.72, 0, 1); }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in { animation: fade-in 0.2s ease; }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet-up, .animate-fade-in { animation: none; }
 }

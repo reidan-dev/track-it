@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getExpenses, createExpense, updateExpense, deleteExpense, settleExpenseParticipant, unsettleExpenseParticipant } from '@/api/expenses'
+import { getExpenses, createExpense, updateExpense, deleteExpense, settleExpenseParticipant, unsettleExpenseParticipant, getExpenseReceipt } from '@/api/expenses'
 import { getPeople } from '@/api/people'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
@@ -12,14 +12,17 @@ import { formatCurrency, EXPENSE_CATEGORIES, getBillingPeriod } from '@/lib/util
 import { PaymentMethodSelect, PaymentMethodBadge } from '@/components/shared/PaymentMethodSelect'
 import { ParticipantsEditor, ME_ID } from '@/components/shared/ParticipantsEditor'
 import { SplitTracker } from '@/components/shared/SplitTracker'
-import { Plus, Trash2, Pencil, Users } from 'lucide-react'
+import { ReceiptCapture } from '@/components/shared/ReceiptCapture'
+import { SwipeableRow } from '@/components/shared/SwipeableRow'
+import { PullToRefresh } from '@/components/shared/PullToRefresh'
+import { Plus, Trash2, Pencil, Users, Paperclip } from 'lucide-react'
 import { useOptimistic, tempId } from '@/lib/optimistic'
 import { usePeriod } from '@/contexts/PeriodContext'
 
 const now = new Date()
 const EMPTY_FORM = {
   name: '', amount: '', category: 'Food', date: now.toISOString().slice(0, 10), note: '',
-  payment_method: '', participants: [ME_ID], participant_amounts: {},
+  payment_method: '', participants: [ME_ID], participant_amounts: {}, receipt_image: null,
 }
 
 export default function Expenses() {
@@ -29,8 +32,9 @@ export default function Expenses() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [receiptLoading, setReceiptLoading] = useState(false)
 
-  const { data: expenses = [] } = useQuery({
+  const { data: expenses = [], refetch } = useQuery({
     queryKey: ['expenses', month, year, period],
     queryFn: () => getExpenses({ month, year, ...(period ? { period } : {}) }).then(r => r.data),
   })
@@ -41,13 +45,13 @@ export default function Expenses() {
 
   const addMutation = useOptimistic(qc, expensesKey, {
     mutationFn: createExpense,
-    apply: (list, data) => [{ id: tempId(), settlements: [], ...data }, ...list],
+    apply: (list, data) => [{ id: tempId(), settlements: [], ...data, has_receipt: !!data.receipt_image }, ...list],
     onSuccess: () => closeForm(),
     also,
   })
   const editMutation = useOptimistic(qc, expensesKey, {
     mutationFn: ({ id, data }) => updateExpense(id, data),
-    apply: (list, { id, data }) => list.map(e => (e.id === id ? { ...e, ...data } : e)),
+    apply: (list, { id, data }) => list.map(e => (e.id === id ? { ...e, ...data, has_receipt: !!data.receipt_image } : e)),
     onSuccess: () => closeForm(),
     also,
   })
@@ -80,12 +84,21 @@ export default function Expenses() {
       payment_method: e.payment_method || '',
       participants: e.participants?.length ? e.participants : [ME_ID],
       participant_amounts: e.participant_amounts || {},
+      receipt_image: null,
     })
     setEditingId(e.id)
     setShowForm(true)
+    // Receipt image is excluded from the list payload; fetch it lazily.
+    if (e.has_receipt) {
+      setReceiptLoading(true)
+      getExpenseReceipt(e.id)
+        .then(r => setForm(f => ({ ...f, receipt_image: r.data.receipt_image })))
+        .catch(() => {})
+        .finally(() => setReceiptLoading(false))
+    }
   }
 
-  const closeForm = () => { setShowForm(false); setEditingId(null); setForm(EMPTY_FORM) }
+  const closeForm = () => { setShowForm(false); setEditingId(null); setForm(EMPTY_FORM); setReceiptLoading(false) }
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -98,6 +111,7 @@ export default function Expenses() {
   const total = expenses.reduce((s, e) => s + parseFloat(e.amount), 0)
 
   return (
+    <PullToRefresh onRefresh={refetch}>
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-1.5">Expenses <HelpTip text="Log spending by category and payment method. Add participants to split a cost and track who pays you back." /></h1>
@@ -130,36 +144,45 @@ export default function Expenses() {
                 {expenses.map(e => {
                   const hasSplit = (e.participants?.length || 0) > 1
                   return (
-                    <li key={e.id} className="py-2.5 text-sm">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          {e.name && <p className="font-medium text-sm truncate">{e.name}</p>}
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="muted">{e.category}</Badge>
-                            <span className="text-xs text-muted-foreground">{e.date}</span>
-                            {hasSplit && <Users className="w-3 h-3 text-muted-foreground" />}
-                            {e.payment_method && <PaymentMethodBadge value={e.payment_method} />}
+                    <li key={e.id}>
+                      <SwipeableRow actions={[
+                        { icon: Pencil, label: 'Edit', onClick: () => openEdit(e), className: 'bg-blue-500' },
+                        { icon: Trash2, label: 'Delete', onClick: () => delMutation.mutate(e.id), className: 'bg-destructive' },
+                      ]}>
+                        <div className="py-2.5 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              {e.name && <p className="font-medium text-sm truncate">{e.name}</p>}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="muted">{e.category}</Badge>
+                                <span className="text-xs text-muted-foreground">{e.date}</span>
+                                {hasSplit && <Users className="w-3 h-3 text-muted-foreground" />}
+                                {e.has_receipt && <Paperclip className="w-3 h-3 text-muted-foreground" />}
+                                {e.payment_method && <PaymentMethodBadge value={e.payment_method} />}
+                              </div>
+                              {e.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.note}</p>}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-medium">{formatCurrency(e.amount)}</span>
+                              {/* Inline actions on desktop; mobile uses swipe */}
+                              <button onClick={() => openEdit(e)} className="hidden sm:inline-flex p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent">
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => delMutation.mutate(e.id)} className="hidden sm:inline-flex p-1 text-muted-foreground hover:text-destructive rounded hover:bg-accent">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
-                          {e.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.note}</p>}
+                          <SplitTracker
+                            entry={e}
+                            amount={e.amount}
+                            people={people}
+                            month={e.month}
+                            year={e.year}
+                            onToggle={(personId, prd, settled) => settleMutation.mutate({ id: e.id, personId, period: prd, settled, m: e.month, y: e.year })}
+                          />
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-medium">{formatCurrency(e.amount)}</span>
-                          <button onClick={() => openEdit(e)} className="p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => delMutation.mutate(e.id)} className="p-1 text-muted-foreground hover:text-destructive rounded hover:bg-accent">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      <SplitTracker
-                        entry={e}
-                        amount={e.amount}
-                        people={people}
-                        month={e.month}
-                        year={e.year}
-                        onToggle={(personId, prd, settled) => settleMutation.mutate({ id: e.id, personId, period: prd, settled, m: e.month, y: e.year })}
-                      />
+                      </SwipeableRow>
                     </li>
                   )
                 })}
@@ -168,7 +191,7 @@ export default function Expenses() {
         </CardContent>
       </Card>
 
-      <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Expense' : 'Add Expense'} className="max-w-lg"
+      <Modal open={showForm} onClose={closeForm} title={editingId ? 'Edit Expense' : 'Add Expense'} className="sm:max-w-lg"
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
@@ -206,6 +229,11 @@ export default function Expenses() {
             <PaymentMethodSelect value={form.payment_method} onChange={v => setForm(f => ({ ...f, payment_method: v }))} />
           </div>
           <div className="space-y-1.5">
+            <Label>Receipt <span className="text-muted-foreground text-xs">(optional)</span></Label>
+            <ReceiptCapture value={form.receipt_image} loading={receiptLoading}
+              onChange={v => setForm(f => ({ ...f, receipt_image: v }))} />
+          </div>
+          <div className="space-y-1.5">
             <Label>Participants & Split <span className="text-muted-foreground text-xs">(who shares this cost)</span></Label>
             <ParticipantsEditor
               participants={form.participants}
@@ -219,5 +247,6 @@ export default function Expenses() {
         </form>
       </Modal>
     </div>
+    </PullToRefresh>
   )
 }

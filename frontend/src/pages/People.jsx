@@ -226,7 +226,7 @@ export default function People({ embedded = false }) {
       </div>
 
       {/* Summary modal */}
-      <Modal open={!!selected && !!summary} onClose={() => setSelected(null)} title="" className="max-w-sm">
+      <Modal open={!!selected && !!summary} onClose={() => setSelected(null)} title="" className="sm:max-w-sm">
         {summary && selectedPerson && (
           <div className="space-y-4">
             <div className="flex items-center gap-4">
@@ -256,7 +256,7 @@ export default function People({ embedded = false }) {
       </Modal>
 
       {/* Add / Edit person modal */}
-      <Modal open={showAdd || !!editingId} onClose={closeForm} title={editingId ? 'Edit Person' : 'Add Person'} className="max-w-lg"
+      <Modal open={showAdd || !!editingId} onClose={closeForm} title={editingId ? 'Edit Person' : 'Add Person'} className="sm:max-w-lg"
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
