@@ -312,12 +312,12 @@ export default function Summary() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map(({ label, value, icon: Icon, color }) => (
           <Card key={label}>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Icon className={`w-4 h-4 ${color}`} />
-                <span className="text-xs text-muted-foreground">{label}</span>
+            <CardContent className="pt-4 pb-4 min-w-0">
+              <div className="flex items-center gap-2 mb-1 min-w-0">
+                <Icon className={`w-4 h-4 shrink-0 ${color}`} />
+                <span className="text-xs text-muted-foreground truncate">{label}</span>
               </div>
-              <p className="text-xl font-semibold">{formatCurrency(value)}</p>
+              <p className="text-lg sm:text-xl font-semibold tabular-nums break-words leading-tight">{formatCurrency(value)}</p>
             </CardContent>
           </Card>
         ))}

@@ -64,10 +64,10 @@ export default function Income() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total</p><p className="text-xl font-bold text-green-500">{formatCurrency(total)}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">1st–15th</p><p className="text-lg font-semibold">{formatCurrency(p1)}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">16th–end</p><p className="text-lg font-semibold">{formatCurrency(p2)}</p></CardContent></Card>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+        <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">Total</p><p className="text-base sm:text-xl font-bold text-green-500 tabular-nums break-words leading-tight">{formatCurrency(total)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">1st–15th</p><p className="text-sm sm:text-lg font-semibold tabular-nums break-words leading-tight">{formatCurrency(p1)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">16th–end</p><p className="text-sm sm:text-lg font-semibold tabular-nums break-words leading-tight">{formatCurrency(p2)}</p></CardContent></Card>
       </div>
 
       <div className="space-y-2">

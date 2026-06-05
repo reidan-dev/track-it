@@ -52,14 +52,22 @@
   html {
     /* Prevent iOS text auto-zoom oddities; respect notches */
     -webkit-text-size-adjust: 100%;
+    /* Vertical-only: no sideways rubber-band (kept off `html` overflow to avoid
+       changing the scroll container and breaking the sticky month navigator). */
+    overscroll-behavior-x: none;
   }
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* No accidental horizontal scroll on phones */
+    width: 100%;
+    max-width: 100vw;
+    /* No accidental horizontal scroll / sideways rubber-band on phones */
     overflow-x: hidden;
-    /* Kill the grey tap flash on mobile */
+    overscroll-behavior-x: none;
+    /* Kill the grey tap flash + double-tap-to-zoom on mobile (pinch is off via
+       the viewport meta). manipulation keeps pan/scroll working everywhere. */
     -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
 }
 

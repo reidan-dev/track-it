@@ -325,9 +325,9 @@ export default function Installments() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Unpaid this month</p><p className="text-xl font-bold text-red-500">{formatCurrency(unpaidThisMonth)}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Paid this month</p><p className="text-xl font-bold text-green-500">{formatCurrency(paidThisMonth)}</p></CardContent></Card>
+      <div className="grid grid-cols-2 gap-2 sm:gap-4">
+        <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">Unpaid this month</p><p className="text-lg sm:text-xl font-bold text-red-500 tabular-nums break-words leading-tight">{formatCurrency(unpaidThisMonth)}</p></CardContent></Card>
+        <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">Paid this month</p><p className="text-lg sm:text-xl font-bold text-green-500 tabular-nums break-words leading-tight">{formatCurrency(paidThisMonth)}</p></CardContent></Card>
       </div>
 
       {installments.length === 0 && <p className="text-sm text-muted-foreground">No installments yet.</p>}
