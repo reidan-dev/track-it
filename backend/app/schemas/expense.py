@@ -17,6 +17,9 @@ class ExpenseCreate(BaseModel):
     participants: list[int] = [0]
     participant_amounts: dict = {}
     receipt_image: Optional[str] = None
+    paid_by: Optional[int] = None
+    payable_to: Optional[int] = None
+    due_date: Optional[_date] = None
 
 
 class ExpenseUpdate(BaseModel):
@@ -32,6 +35,9 @@ class ExpenseUpdate(BaseModel):
     participants: Optional[list[int]] = None
     participant_amounts: Optional[dict] = None
     receipt_image: Optional[str] = None
+    paid_by: Optional[int] = None
+    payable_to: Optional[int] = None
+    due_date: Optional[_date] = None
 
 
 class ExpenseSettlementOut(BaseModel):
@@ -62,6 +68,9 @@ class ExpenseOut(BaseModel):
     participants: list[int] = []
     participant_amounts: dict = {}
     has_receipt: bool = False
+    paid_by: Optional[int] = None
+    payable_to: Optional[int] = None
+    due_date: Optional[_date] = None
     settlements: list[ExpenseSettlementOut] = []
 
     @field_validator("participants", mode="before")

@@ -70,3 +70,4 @@ class UserSettingsUpdate(BaseModel):
     balance_reminder_enabled: Optional[bool] = None
     currency: Optional[str] = None
     theme: Optional[str] = None
+    palette: Optional[str] = None

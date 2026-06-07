@@ -15,5 +15,7 @@ class Income(Base):
     period = Column(Integer, nullable=False)  # 1 or 2
     month = Column(Integer, nullable=False)
     year = Column(Integer, nullable=False)
+    payable_from = Column(Integer, nullable=True)  # person id who pays you (expected income)
+    due_date = Column(Date, nullable=True)         # when the income is expected
 
     user = relationship("User", back_populates="incomes")

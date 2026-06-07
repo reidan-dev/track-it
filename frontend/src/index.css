@@ -43,6 +43,24 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 48%;
   }
+
+  /* ── Accent palettes ──────────────────────────────────────────────────────
+     Layered on top of light/dark by adding a `palette-*` class to <html>.
+     They only retint the accent (--primary/--ring), so light & dark still work. */
+  .palette-emerald { --primary: 160 84% 39%; --ring: 160 84% 39%; }
+  .palette-emerald.dark { --primary: 158 64% 52%; --ring: 158 64% 52%; }
+
+  .palette-violet { --primary: 262 83% 58%; --ring: 262 83% 58%; }
+  .palette-violet.dark { --primary: 263 70% 65%; --ring: 263 70% 65%; }
+
+  .palette-rose { --primary: 347 77% 50%; --ring: 347 77% 50%; }
+  .palette-rose.dark { --primary: 350 89% 60%; --ring: 350 89% 60%; }
+
+  .palette-amber { --primary: 38 92% 50%; --primary-foreground: 26 83% 14%; --ring: 38 92% 50%; }
+  .palette-amber.dark { --primary: 43 96% 56%; --primary-foreground: 26 83% 14%; --ring: 43 96% 56%; }
+
+  .palette-cyan { --primary: 192 91% 42%; --ring: 192 91% 42%; }
+  .palette-cyan.dark { --primary: 188 86% 53%; --primary-foreground: 222.2 47.4% 11.2%; --ring: 188 86% 53%; }
 }
 
 @layer base {

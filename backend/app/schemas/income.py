@@ -12,6 +12,8 @@ class IncomeCreate(BaseModel):
     period: int
     month: int
     year: int
+    payable_from: Optional[int] = None
+    due_date: Optional[date] = None
 
 
 class IncomeUpdate(BaseModel):
@@ -22,6 +24,8 @@ class IncomeUpdate(BaseModel):
     period: Optional[int] = None
     month: Optional[int] = None
     year: Optional[int] = None
+    payable_from: Optional[int] = None
+    due_date: Optional[date] = None
 
 
 class IncomeOut(BaseModel):
@@ -34,6 +38,8 @@ class IncomeOut(BaseModel):
     period: int
     month: int
     year: int
+    payable_from: Optional[int] = None
+    due_date: Optional[date] = None
 
     class Config:
         from_attributes = True

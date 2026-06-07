@@ -21,6 +21,9 @@ class Expense(Base):
     participants = Column(JSON, default=list)        # person ids sharing the cost; 0 = Me
     participant_amounts = Column(JSON, default=dict)  # optional custom per-person split
     receipt_image = Column(Text, nullable=True)      # base64 data URL of an attached receipt photo
+    paid_by = Column(Integer, nullable=True)         # person id who fronted the money; null/0 = Me
+    payable_to = Column(Integer, nullable=True)      # person id you owe repayment to
+    due_date = Column(Date, nullable=True)           # when repayment is expected
 
     user = relationship("User", back_populates="expenses")
     settlements = relationship("ExpenseParticipantSettlement", back_populates="expense", cascade="all, delete-orphan")

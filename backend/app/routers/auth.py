@@ -15,9 +15,28 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    # Best-effort cookie fallback. The client also keeps the refresh token in
+    # localStorage and sends it in the request body, so cross-site SameSite
+    # rules can't silently log the user out.
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        max_age=settings.refresh_token_expire_days * 86400,
+        samesite="lax",
+        secure=False,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -27,26 +46,28 @@ def login(data: LoginRequest, response: Response, db: Session = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     access_token = create_access_token({"sub": str(user.id)})
     refresh_token = create_refresh_token({"sub": str(user.id)})
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        max_age=settings.refresh_token_expire_days * 86400,
-        samesite="lax",
-        secure=False,
-    )
-    return {"access_token": access_token}
+    _set_refresh_cookie(response, refresh_token)
+    return {"access_token": access_token, "refresh_token": refresh_token}
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(refresh_token: Optional[str] = Cookie(default=None)):
-    if not refresh_token:
+def refresh(
+    response: Response,
+    body: Optional[RefreshRequest] = None,
+    refresh_token: Optional[str] = Cookie(default=None),
+):
+    # Prefer the token from the request body (origin-independent); fall back to
+    # the cookie for browsers that still send it.
+    token = (body.refresh_token if body else None) or refresh_token
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh token")
-    payload = decode_token(refresh_token)
+    payload = decode_token(token)
     if payload.get("type") != "refresh":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
     access_token = create_access_token({"sub": payload["sub"]})
-    return {"access_token": access_token}
+    new_refresh = create_refresh_token({"sub": payload["sub"]})
+    _set_refresh_cookie(response, new_refresh)
+    return {"access_token": access_token, "refresh_token": new_refresh}
 
 
 @router.post("/logout")

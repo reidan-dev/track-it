@@ -11,11 +11,12 @@ import { Modal } from '@/components/shared/Modal'
 import { formatCurrency, EXPENSE_CATEGORIES, getBillingPeriod } from '@/lib/utils'
 import { PaymentMethodSelect, PaymentMethodBadge } from '@/components/shared/PaymentMethodSelect'
 import { ParticipantsEditor, ME_ID } from '@/components/shared/ParticipantsEditor'
+import { PersonSelect, personName } from '@/components/shared/PersonSelect'
 import { SplitTracker } from '@/components/shared/SplitTracker'
 import { ReceiptCapture } from '@/components/shared/ReceiptCapture'
 import { SwipeableRow } from '@/components/shared/SwipeableRow'
 import { PullToRefresh } from '@/components/shared/PullToRefresh'
-import { Plus, Trash2, Pencil, Users, Paperclip } from 'lucide-react'
+import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock } from 'lucide-react'
 import { useOptimistic, tempId } from '@/lib/optimistic'
 import { usePeriod } from '@/contexts/PeriodContext'
 
@@ -23,6 +24,7 @@ const now = new Date()
 const EMPTY_FORM = {
   name: '', amount: '', category: 'Food', date: now.toISOString().slice(0, 10), note: '',
   payment_method: '', participants: [ME_ID], participant_amounts: {}, receipt_image: null,
+  paid_by: null, payable_to: null, due_date: '',
 }
 
 export default function Expenses() {
@@ -85,6 +87,9 @@ export default function Expenses() {
       participants: e.participants?.length ? e.participants : [ME_ID],
       participant_amounts: e.participant_amounts || {},
       receipt_image: null,
+      paid_by: e.paid_by ?? null,
+      payable_to: e.payable_to ?? null,
+      due_date: e.due_date || '',
     })
     setEditingId(e.id)
     setShowForm(true)
@@ -103,7 +108,7 @@ export default function Expenses() {
   const handleSubmit = (e) => {
     e.preventDefault()
     const d = new Date(form.date)
-    const payload = { ...form, amount: parseFloat(form.amount), period: getBillingPeriod(d.getDate()), month: d.getMonth() + 1, year: d.getFullYear() }
+    const payload = { ...form, amount: parseFloat(form.amount), due_date: form.due_date || null, period: getBillingPeriod(d.getDate()), month: d.getMonth() + 1, year: d.getFullYear() }
     if (editingId) editMutation.mutate({ id: editingId, data: payload })
     else addMutation.mutate(payload)
   }
@@ -160,6 +165,14 @@ export default function Expenses() {
                                 {e.has_receipt && <Paperclip className="w-3 h-3 text-muted-foreground" />}
                                 {e.payment_method && <PaymentMethodBadge value={e.payment_method} />}
                               </div>
+                              {(e.paid_by || e.payable_to || e.due_date) && (
+                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-xs text-muted-foreground">
+                                  <CalendarClock className="w-3 h-3 shrink-0" />
+                                  {e.paid_by ? <span>paid by {personName(people, e.paid_by)}</span> : null}
+                                  {e.payable_to ? <span>· owe {personName(people, e.payable_to)}</span> : null}
+                                  {e.due_date ? <span>· due {e.due_date}</span> : null}
+                                </div>
+                              )}
                               {e.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.note}</p>}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
@@ -217,8 +230,22 @@ export default function Expenses() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Date</Label>
+            <Label>Transaction date</Label>
             <Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Paid by <span className="text-muted-foreground text-xs">(who fronted it)</span></Label>
+              <PersonSelect value={form.paid_by} onChange={v => setForm(f => ({ ...f, paid_by: v }))} people={people} includeMe />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Payable to <span className="text-muted-foreground text-xs">(who you owe)</span></Label>
+              <PersonSelect value={form.payable_to} onChange={v => setForm(f => ({ ...f, payable_to: v }))} people={people} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Due date <span className="text-muted-foreground text-xs">(when you repay — optional)</span></Label>
+            <Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
           </div>
           <div className="space-y-1.5">
             <Label>Note (optional)</Label>

@@ -22,8 +22,7 @@ function LockScreen({ onUnlocked }) {
     }
   }, [hasBio, onUnlocked])
 
-  // Offer biometric immediately on open.
-  useEffect(() => { tryBiometric() }, [tryBiometric])
+  // No auto-prompt: show the PIN pad first; biometrics fire only on tap.
 
   const submit = useCallback(async (value) => {
     if (await verifyPin(value)) {

@@ -29,6 +29,7 @@ def get_settings(
     result = UserSettingsOut.model_validate(s).model_dump()
     result["currency"] = current_user.currency
     result["theme"] = current_user.theme
+    result["palette"] = current_user.palette
     return result
 
 
@@ -44,6 +45,8 @@ def update_settings(
         current_user.currency = update_data.pop("currency")
     if "theme" in update_data:
         current_user.theme = update_data.pop("theme")
+    if "palette" in update_data:
+        current_user.palette = update_data.pop("palette")
     for field, value in update_data.items():
         setattr(s, field, value)
     db.commit()
@@ -51,6 +54,7 @@ def update_settings(
     result = UserSettingsOut.model_validate(s).model_dump()
     result["currency"] = current_user.currency
     result["theme"] = current_user.theme
+    result["palette"] = current_user.palette
     return result
 
 

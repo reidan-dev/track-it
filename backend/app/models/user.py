@@ -12,6 +12,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     currency = Column(String, default="PHP")
     theme = Column(String, default="system")
+    palette = Column(String, default="blue")  # accent palette layered on light/dark
     created_at = Column(DateTime, default=datetime.utcnow)
 
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
