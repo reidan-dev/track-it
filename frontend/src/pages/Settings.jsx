@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getSettings, updateSettings, testTelegram, testReminder, exportModule } from '@/api/settings'
+import { getSettings, updateSettings, testTelegram, connectTelegram, disconnectTelegram, testReminder, exportModule } from '@/api/settings'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
 import { Input, Label, Select } from '@/components/shared/Input'
@@ -108,6 +108,10 @@ export default function Settings() {
         p1_lead_prev_month: settings.p1_lead_prev_month || false,
         p2_lead_prev_month: settings.p2_lead_prev_month || false,
         balance_reminder_enabled: settings.balance_reminder_enabled || false,
+        digest_enabled: settings.digest_enabled || false,
+        digest_frequency: settings.digest_frequency || 'daily',
+        digest_time: settings.digest_time || '08:00',
+        digest_weekday: settings.digest_weekday ?? 0,
       })
     }
   }, [settings])
@@ -129,6 +133,23 @@ export default function Settings() {
     mutationFn: testTelegram,
     onSuccess: () => setTestMsg('Test message sent!'),
     onError: () => setTestMsg('Failed to send. Check your token and chat ID.'),
+  })
+
+  const [botMsg, setBotMsg] = useState('')
+  const [botLink, setBotLink] = useState('')
+  const connectMutation = useMutation({
+    mutationFn: connectTelegram,
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      setBotLink(res.data?.deep_link || '')
+      setBotMsg(res.data?.message || 'Bot connected.')
+    },
+    onError: (err) => setBotMsg(err.response?.data?.detail || 'Connect failed. Save a valid bot token first.'),
+  })
+  const disconnectMutation = useMutation({
+    mutationFn: disconnectTelegram,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setBotLink(''); setBotMsg('Bot disconnected.') },
+    onError: () => setBotMsg('Disconnect failed.'),
   })
 
   const reminderTestMutation = useMutation({
@@ -310,6 +331,67 @@ export default function Settings() {
             </Button>
           </div>
           {testMsg && <p className="text-sm text-muted-foreground">{testMsg}</p>}
+
+          {/* ── Interactive bot (F10) ─────────────────────────────────── */}
+          <div className="border-t pt-4 space-y-2">
+            <Label>Interactive bot</Label>
+            <p className="text-sm text-muted-foreground">
+              Connect to send commands <em>to</em> the bot — add expenses, mark bills paid, check balances right from Telegram.
+              Save your bot token first, then Connect and tap <strong>Start</strong> in the chat to link it (auto-fills your Chat ID).
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <Button onClick={() => connectMutation.mutate()} disabled={connectMutation.isPending} variant="secondary">
+                {connectMutation.isPending ? 'Connecting…' : (settings?.telegram_enabled ? 'Reconnect Bot' : 'Connect Bot')}
+              </Button>
+              {settings?.telegram_enabled && (
+                <Button onClick={() => disconnectMutation.mutate()} disabled={disconnectMutation.isPending} variant="ghost">
+                  Disconnect
+                </Button>
+              )}
+            </div>
+            {botLink && (
+              <p className="text-sm">
+                Open your bot: <a href={botLink} target="_blank" rel="noreferrer" className="text-primary underline">{botLink}</a>
+              </p>
+            )}
+            {botMsg && <p className="text-sm text-muted-foreground">{botMsg}</p>}
+          </div>
+
+          {/* ── Digest (F6) ───────────────────────────────────────────── */}
+          <div className="border-t pt-4 space-y-3">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={form.digest_enabled}
+                onChange={e => setForm(f => ({ ...f, digest_enabled: e.target.checked }))} />
+              Spending digest
+            </label>
+            <p className="text-sm text-muted-foreground">A scheduled summary of spending, top categories and what's due soon, with quick action buttons.</p>
+            {form.digest_enabled && (
+              <div className="flex gap-3 flex-wrap items-end">
+                <div className="space-y-1.5">
+                  <Label>Frequency</Label>
+                  <Select value={form.digest_frequency} onChange={e => setForm(f => ({ ...f, digest_frequency: e.target.value }))}>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                  </Select>
+                </div>
+                {form.digest_frequency === 'weekly' && (
+                  <div className="space-y-1.5">
+                    <Label>Day</Label>
+                    <Select value={form.digest_weekday} onChange={e => setForm(f => ({ ...f, digest_weekday: Number(e.target.value) }))}>
+                      {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d, i) => (
+                        <option key={i} value={i}>{d}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label>Time</Label>
+                  <Input type="time" value={form.digest_time} onChange={e => setForm(f => ({ ...f, digest_time: e.target.value }))} className="w-32" />
+                </div>
+              </div>
+            )}
+            <Button onClick={() => saveMutation.mutate(form)} variant="outline" size="sm">Save digest</Button>
+          </div>
         </CardContent>
       </Card>
 

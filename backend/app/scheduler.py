@@ -12,7 +12,6 @@ import logging
 from calendar import monthrange
 from datetime import datetime, timedelta
 
-import httpx
 from sqlalchemy import or_
 
 from app.database import SessionLocal
@@ -168,15 +167,9 @@ def build_balance_message(db, user, month, year, period=None):
     return "\n".join(lines)
 
 
-def send_telegram(token, chat_id, text):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    try:
-        with httpx.Client(timeout=10) as client:
-            resp = client.post(url, json={"chat_id": chat_id, "text": text})
-        return resp.status_code == 200
-    except httpx.HTTPError as exc:
-        logger.warning("Telegram send failed: %s", exc)
-        return False
+def send_telegram(token, chat_id, text, reply_markup=None):
+    from app.telegram import api  # local import: api never imports scheduler
+    return api.send_message(token, chat_id, text, reply_markup=reply_markup) is not None
 
 
 def _next_month(year, month):
@@ -231,7 +224,12 @@ def check_and_send_reminders():
 
                 if s.bill_reminder_enabled and bill_last != stamp:
                     msg = build_period_message(db, user, tm, ty, period)
-                    if send_telegram(s.telegram_bot_token, s.telegram_chat_id, msg):
+                    # If inbound is enabled, attach tap-to-pay buttons (F4).
+                    markup = None
+                    if s.telegram_enabled and s.telegram_webhook_secret:
+                        from app.telegram.views import due_view
+                        _, markup = due_view(db, user, ty, tm, period)
+                    if send_telegram(s.telegram_bot_token, s.telegram_chat_id, msg, reply_markup=markup):
                         if period == 1:
                             s.p1_last_sent = stamp
                         else:
@@ -254,6 +252,47 @@ def check_and_send_reminders():
         db.close()
 
 
+def _time_reached(time_cfg, local_now):
+    """True if local_now is at/after the configured HH:MM today."""
+    try:
+        hh, mm = (int(x) for x in str(time_cfg or "08:00").split(":"))
+    except (ValueError, AttributeError):
+        hh, mm = 8, 0
+    return local_now >= local_now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+
+def check_and_send_digests():
+    """F6 — opt-in daily/weekly spending digest with action buttons."""
+    db = SessionLocal()
+    try:
+        rows = db.query(UserSettings).filter(UserSettings.digest_enabled.is_(True)).all()
+        for s in rows:
+            if not (s.telegram_enabled and s.telegram_bot_token and s.telegram_chat_id):
+                continue
+            offset = s.reminder_utc_offset if s.reminder_utc_offset is not None else 8
+            local_now = datetime.utcnow() + timedelta(hours=offset)
+            if (s.digest_frequency or "daily") == "weekly" and local_now.weekday() != (s.digest_weekday or 0):
+                continue
+            if not _time_reached(s.digest_time, local_now):
+                continue
+            stamp = local_now.strftime("%Y-%m-%d")
+            if s.digest_last_sent == stamp:
+                continue
+            user = db.query(User).filter(User.id == s.user_id).first()
+            if not user:
+                continue
+            from app.telegram.views import digest_view
+            text, markup = digest_view(db, user, local_now.year, local_now.month)
+            if send_telegram(s.telegram_bot_token, s.telegram_chat_id, text, reply_markup=markup):
+                s.digest_last_sent = stamp
+                db.commit()
+                logger.info("Sent digest to user %s for %s", user.id, stamp)
+    except Exception:  # noqa: BLE001
+        logger.exception("Digest check failed")
+    finally:
+        db.close()
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler is not None:
@@ -263,6 +302,10 @@ def start_scheduler():
     _scheduler.add_job(
         check_and_send_reminders, "interval", minutes=5,
         id="bill_reminders", coalesce=True, max_instances=1,
+    )
+    _scheduler.add_job(
+        check_and_send_digests, "interval", minutes=5,
+        id="digests", coalesce=True, max_instances=1,
     )
     _scheduler.start()
     logger.info("Reminder scheduler started")

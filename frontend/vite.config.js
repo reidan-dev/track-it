@@ -8,6 +8,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // We register + drive updates ourselves in main.jsx so long-open tabs poll
+      // for new deploys and reload onto the fresh build (no stale-asset errors).
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png'],
       manifest: {
         name: 'track.it',
@@ -29,6 +32,10 @@ export default defineConfig({
       workbox: {
         // Precache the app shell + static assets.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // A new SW takes over immediately instead of waiting for every tab to
+        // close — pairs with the controllerchange reload in main.jsx.
+        skipWaiting: true,
+        clientsClaim: true,
         // SPA fallback so deep links work offline; exclude API + auth paths.
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api/, /^\/auth/],

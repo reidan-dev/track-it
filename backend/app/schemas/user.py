@@ -42,6 +42,10 @@ class UserSettingsOut(BaseModel):
     p1_lead_prev_month: Optional[bool] = False
     p2_lead_prev_month: Optional[bool] = False
     balance_reminder_enabled: Optional[bool] = False
+    digest_enabled: Optional[bool] = False
+    digest_frequency: Optional[str] = "daily"
+    digest_time: Optional[str] = "08:00"
+    digest_weekday: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -68,6 +72,10 @@ class UserSettingsUpdate(BaseModel):
     p1_lead_prev_month: Optional[bool] = None
     p2_lead_prev_month: Optional[bool] = None
     balance_reminder_enabled: Optional[bool] = None
+    digest_enabled: Optional[bool] = None
+    digest_frequency: Optional[str] = None
+    digest_time: Optional[str] = None
+    digest_weekday: Optional[int] = None
     currency: Optional[str] = None
     theme: Optional[str] = None
     palette: Optional[str] = None

@@ -3,8 +3,25 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient } from '@tanstack/react-query'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
+import { registerSW } from 'virtual:pwa-register'
 import App from './App'
 import './index.css'
+
+// PWA service worker. autoUpdate means a new deploy's SW skips waiting, claims
+// the page, and the app reloads onto the fresh build automatically. We also poll
+// so a tab left open for hours still picks up new deploys instead of running a
+// stale index.html whose hashed assets the new deploy has already deleted.
+registerSW({
+  immediate: true,
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return
+    const checkForUpdate = () => registration.update().catch(() => {})
+    setInterval(checkForUpdate, 60 * 60 * 1000) // hourly
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') checkForUpdate()
+    })
+  },
+})
 
 const queryClient = new QueryClient({
   defaultOptions: {

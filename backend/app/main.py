@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import auth, expenses, installments, bills, loans, income, people, dashboard, calendar, settings as settings_router, export, payment_methods
+from app.routers import auth, expenses, installments, bills, loans, income, people, dashboard, calendar, settings as settings_router, export, payment_methods, telegram
 from app.scheduler import start_scheduler
 
 
@@ -34,6 +34,7 @@ app.include_router(calendar.router)
 app.include_router(settings_router.router)
 app.include_router(export.router)
 app.include_router(payment_methods.router)
+app.include_router(telegram.router)
 
 
 @app.get("/health")

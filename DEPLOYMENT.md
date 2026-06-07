@@ -141,6 +141,7 @@ The database already lives on Supabase — nothing to provision. Just copy its c
    | `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` |
    | `REFRESH_TOKEN_EXPIRE_DAYS` | `30` |
    | `ALLOWED_ORIGINS` | `http://localhost:5173` for now — you'll add the Vercel URL in Step 4 |
+   | `PUBLIC_BASE_URL` | *(optional)* This backend's own public URL, e.g. `https://track-it-backend.up.railway.app` — required only for the **interactive Telegram bot** (webhooks). Add it after Step 5 once you have the Railway domain. |
 4. Railway auto-deploys (Railpack detects Python from `requirements.txt`). The repo includes **`backend/.python-version` pinned to `3.12`** — keep it: Python 3.13 has no prebuilt wheel for this `pydantic` version and the build fails trying to compile Rust.
 5. Under **Settings → Networking**, click **Generate Domain**. Note the URL, e.g. `https://track-it-backend.up.railway.app`.
 6. Confirm it's live: open `https://<your-backend>.up.railway.app/health` → should return `{"status":"ok"}`. API docs are at `/docs`.
@@ -194,6 +195,22 @@ The backend reads allowed origins from the `ALLOWED_ORIGINS` env var (comma-sepa
 
 ---
 
+### Step 6 — (Optional) Interactive Telegram bot
+
+The bot can also *receive* commands (add expenses, mark bills paid, check balances/spending, log loans, capture receipt photos) via Telegram's native buttons and prompts. It's multi-tenant: each user brings their own bot token.
+
+1. Run the new migration (it adds the webhook secret, digest settings and a conversation-state table):
+   ```bash
+   railway run alembic upgrade head
+   ```
+   *(Or set it as the Pre-Deploy Command — see "Updating in Production".)*
+2. In Railway → backend **Variables**, set `PUBLIC_BASE_URL` to the backend's domain from Step 2 (e.g. `https://track-it-backend.up.railway.app`).
+3. In the app: **Settings → Telegram** → paste your bot token (from [@BotFather](https://t.me/BotFather)) → **Save** → **Connect Bot**. Open the deep link it shows and tap **Start** — that links the chat and populates your Chat ID automatically. Reminders gain tap-to-pay buttons; turn on the **Spending digest** there too if you want it.
+
+> Without `PUBLIC_BASE_URL` the bot stays outbound-only (scheduled reminders still work); inbound commands need the webhook.
+
+---
+
 ## Environment Variables Reference
 
 ### Backend (`/backend/.env`)
@@ -206,6 +223,7 @@ The backend reads allowed origins from the `ALLOWED_ORIGINS` env var (comma-sepa
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime |
 | `ALLOWED_ORIGINS` | Comma-separated frontend URLs for CORS |
+| `PUBLIC_BASE_URL` | This backend's public HTTPS URL; enables the interactive Telegram bot (webhooks). Optional — blank keeps Telegram outbound-only. |
 
 ### Frontend (`/frontend/.env`)
 

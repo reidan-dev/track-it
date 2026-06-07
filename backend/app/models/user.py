@@ -60,4 +60,15 @@ class UserSettings(Base):
     balance_p1_last_sent = Column(String, nullable=True)
     balance_p2_last_sent = Column(String, nullable=True)
 
+    # Inbound Telegram bot — per-user webhook secret (also identifies the user on
+    # the /telegram/webhook/{secret} route and verified via secret_token header).
+    telegram_webhook_secret = Column(String, nullable=True, index=True)
+
+    # Opt-in spending digest (F6) — daily or weekly summary with action buttons.
+    digest_enabled = Column(Boolean, default=False)
+    digest_frequency = Column(String, default="daily")   # daily | weekly
+    digest_time = Column(String, default="08:00")        # local "HH:MM"
+    digest_weekday = Column(Integer, default=0)          # 0=Mon .. 6=Sun (weekly only)
+    digest_last_sent = Column(String, nullable=True)     # "YYYY-MM-DD" dedup stamp
+
     user = relationship("User", back_populates="settings")
