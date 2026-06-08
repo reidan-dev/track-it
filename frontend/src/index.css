@@ -43,25 +43,120 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 224.3 76.3% 48%;
   }
-
-  /* ── Accent palettes ──────────────────────────────────────────────────────
-     Layered on top of light/dark by adding a `palette-*` class to <html>.
-     They only retint the accent (--primary/--ring), so light & dark still work. */
-  .palette-emerald { --primary: 160 84% 39%; --ring: 160 84% 39%; }
-  .palette-emerald.dark { --primary: 158 64% 52%; --ring: 158 64% 52%; }
-
-  .palette-violet { --primary: 262 83% 58%; --ring: 262 83% 58%; }
-  .palette-violet.dark { --primary: 263 70% 65%; --ring: 263 70% 65%; }
-
-  .palette-rose { --primary: 347 77% 50%; --ring: 347 77% 50%; }
-  .palette-rose.dark { --primary: 350 89% 60%; --ring: 350 89% 60%; }
-
-  .palette-amber { --primary: 38 92% 50%; --primary-foreground: 26 83% 14%; --ring: 38 92% 50%; }
-  .palette-amber.dark { --primary: 43 96% 56%; --primary-foreground: 26 83% 14%; --ring: 43 96% 56%; }
-
-  .palette-cyan { --primary: 192 91% 42%; --ring: 192 91% 42%; }
-  .palette-cyan.dark { --primary: 188 86% 53%; --primary-foreground: 222.2 47.4% 11.2%; --ring: 188 86% 53%; }
 }
+
+/* ── Theme skins ────────────────────────────────────────────────────────────
+   NOTE: intentionally OUTSIDE @layer base. Tailwind tree-shakes custom rules
+   inside @layer when their class name isn't found literally in content, and
+   these are applied dynamically ('theme-' + id). Unlayered rules are kept and
+   also outrank the layered :root/.dark defaults, so a skin always wins.
+   ──────────────────────────────────────────────────────────────────────────
+     Each `.theme-<id>` redefines the full token set, so it fully restyles every
+     surface. Dark skins also get the `.dark` class (added in JS) so Tailwind
+     `dark:` utilities resolve; these rules come after `.dark` so they win.
+     The accent (--primary / --ring / --primary-foreground) is overridden inline
+     by the colour picker when set — the values here are each skin's default. */
+
+  .theme-midnight {
+    --background: 230 35% 7%; --foreground: 220 30% 92%;
+    --card: 230 30% 10%; --card-foreground: 220 30% 92%;
+    --secondary: 230 25% 16%; --secondary-foreground: 220 30% 92%;
+    --muted: 230 25% 16%; --muted-foreground: 220 15% 62%;
+    --accent: 230 25% 18%; --accent-foreground: 220 30% 92%;
+    --destructive: 0 63% 47%; --destructive-foreground: 220 30% 96%;
+    --border: 230 25% 18%; --input: 230 25% 18%;
+    --primary: 234 89% 74%; --primary-foreground: 230 35% 10%; --ring: 234 89% 74%;
+  }
+  .theme-slate {
+    --background: 215 28% 12%; --foreground: 210 20% 92%;
+    --card: 215 24% 15%; --card-foreground: 210 20% 92%;
+    --secondary: 215 18% 22%; --secondary-foreground: 210 20% 92%;
+    --muted: 215 18% 22%; --muted-foreground: 215 12% 64%;
+    --accent: 215 18% 24%; --accent-foreground: 210 20% 92%;
+    --destructive: 0 63% 47%; --destructive-foreground: 210 20% 96%;
+    --border: 215 16% 24%; --input: 215 16% 24%;
+    --primary: 210 90% 60%; --primary-foreground: 215 28% 12%; --ring: 210 90% 60%;
+  }
+  .theme-nord {
+    --background: 220 16% 22%; --foreground: 218 27% 92%;
+    --card: 222 16% 25%; --card-foreground: 218 27% 92%;
+    --secondary: 220 16% 30%; --secondary-foreground: 218 27% 92%;
+    --muted: 220 16% 30%; --muted-foreground: 219 14% 72%;
+    --accent: 220 16% 32%; --accent-foreground: 218 27% 92%;
+    --destructive: 354 42% 56%; --destructive-foreground: 218 27% 94%;
+    --border: 220 16% 32%; --input: 220 16% 32%;
+    --primary: 193 43% 67%; --primary-foreground: 220 16% 18%; --ring: 193 43% 67%;
+  }
+  .theme-forest {
+    --background: 150 30% 8%; --foreground: 120 15% 90%;
+    --card: 150 28% 11%; --card-foreground: 120 15% 90%;
+    --secondary: 150 20% 18%; --secondary-foreground: 120 15% 90%;
+    --muted: 150 20% 18%; --muted-foreground: 140 12% 62%;
+    --accent: 150 20% 20%; --accent-foreground: 120 15% 90%;
+    --destructive: 0 63% 47%; --destructive-foreground: 120 15% 94%;
+    --border: 150 18% 20%; --input: 150 18% 20%;
+    --primary: 142 70% 45%; --primary-foreground: 150 30% 8%; --ring: 142 70% 45%;
+  }
+  .theme-ocean {
+    --background: 202 50% 8%; --foreground: 195 25% 90%;
+    --card: 202 45% 11%; --card-foreground: 195 25% 90%;
+    --secondary: 202 35% 18%; --secondary-foreground: 195 25% 90%;
+    --muted: 202 35% 18%; --muted-foreground: 195 15% 62%;
+    --accent: 202 35% 20%; --accent-foreground: 195 25% 90%;
+    --destructive: 0 63% 47%; --destructive-foreground: 195 25% 94%;
+    --border: 202 30% 20%; --input: 202 30% 20%;
+    --primary: 190 85% 50%; --primary-foreground: 202 50% 8%; --ring: 190 85% 50%;
+  }
+  .theme-dracula {
+    --background: 231 15% 18%; --foreground: 60 30% 96%;
+    --card: 232 14% 21%; --card-foreground: 60 30% 96%;
+    --secondary: 232 14% 28%; --secondary-foreground: 60 30% 96%;
+    --muted: 232 14% 28%; --muted-foreground: 226 14% 73%;
+    --accent: 232 14% 31%; --accent-foreground: 60 30% 96%;
+    --destructive: 0 100% 67%; --destructive-foreground: 60 30% 96%;
+    --border: 232 14% 31%; --input: 232 14% 31%;
+    --primary: 265 89% 78%; --primary-foreground: 231 15% 15%; --ring: 265 89% 78%;
+  }
+  .theme-rosepine {
+    --background: 249 22% 14%; --foreground: 245 50% 91%;
+    --card: 248 24% 18%; --card-foreground: 245 50% 91%;
+    --secondary: 248 20% 25%; --secondary-foreground: 245 50% 91%;
+    --muted: 248 20% 25%; --muted-foreground: 245 18% 70%;
+    --accent: 248 20% 28%; --accent-foreground: 245 50% 91%;
+    --destructive: 343 76% 68%; --destructive-foreground: 245 50% 94%;
+    --border: 248 20% 28%; --input: 248 20% 28%;
+    --primary: 197 49% 60%; --primary-foreground: 249 22% 14%; --ring: 197 49% 60%;
+  }
+  .theme-sepia {
+    --background: 40 38% 94%; --foreground: 30 25% 18%;
+    --card: 40 42% 97%; --card-foreground: 30 25% 18%;
+    --secondary: 38 30% 88%; --secondary-foreground: 30 25% 22%;
+    --muted: 38 30% 88%; --muted-foreground: 32 18% 42%;
+    --accent: 38 35% 85%; --accent-foreground: 30 25% 22%;
+    --destructive: 0 65% 48%; --destructive-foreground: 40 42% 97%;
+    --border: 36 25% 80%; --input: 36 25% 80%;
+    --primary: 24 70% 45%; --primary-foreground: 40 42% 97%; --ring: 24 70% 45%;
+  }
+  .theme-solarized {
+    --background: 44 87% 94%; --foreground: 192 81% 14%;
+    --card: 44 60% 97%; --card-foreground: 192 81% 14%;
+    --secondary: 45 50% 88%; --secondary-foreground: 192 81% 18%;
+    --muted: 45 50% 88%; --muted-foreground: 196 13% 45%;
+    --accent: 45 55% 85%; --accent-foreground: 192 81% 18%;
+    --destructive: 1 71% 52%; --destructive-foreground: 44 87% 96%;
+    --border: 46 33% 82%; --input: 46 33% 82%;
+    --primary: 205 69% 49%; --primary-foreground: 44 87% 96%; --ring: 205 69% 49%;
+  }
+  .theme-mono {
+    --background: 0 0% 98%; --foreground: 0 0% 10%;
+    --card: 0 0% 100%; --card-foreground: 0 0% 10%;
+    --secondary: 0 0% 93%; --secondary-foreground: 0 0% 15%;
+    --muted: 0 0% 93%; --muted-foreground: 0 0% 40%;
+    --accent: 0 0% 90%; --accent-foreground: 0 0% 15%;
+    --destructive: 0 65% 48%; --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 85%; --input: 0 0% 85%;
+    --primary: 0 0% 20%; --primary-foreground: 0 0% 98%; --ring: 0 0% 20%;
+  }
 
 @layer base {
   * {

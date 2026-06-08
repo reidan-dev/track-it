@@ -7,27 +7,12 @@ import { Button } from '@/components/shared/Button'
 import { Input, Label, Select } from '@/components/shared/Input'
 import { Badge } from '@/components/shared/Badge'
 import { cn } from '@/lib/utils'
+import { BASE_THEMES, SKINS, ACCENT_SWATCHES, applyTheme, applyAccent, resolveAccent } from '@/lib/theme'
 import People from '@/pages/People'
 import PaymentMethods from '@/pages/PaymentMethods'
 import { SecuritySettings } from '@/components/shared/SecuritySettings'
 
 const CURRENCIES = ['PHP', 'USD', 'EUR', 'JPY', 'SGD']
-const THEMES = ['system', 'light', 'dark']
-const PALETTES = [
-  { id: 'blue', label: 'Blue', color: 'hsl(221 83% 53%)' },
-  { id: 'emerald', label: 'Emerald', color: 'hsl(160 84% 39%)' },
-  { id: 'violet', label: 'Violet', color: 'hsl(262 83% 58%)' },
-  { id: 'rose', label: 'Rose', color: 'hsl(347 77% 50%)' },
-  { id: 'amber', label: 'Amber', color: 'hsl(38 92% 50%)' },
-  { id: 'cyan', label: 'Cyan', color: 'hsl(192 91% 42%)' },
-]
-
-function applyPalette(p) {
-  const el = document.documentElement
-  el.className = el.className.replace(/\bpalette-\S+/g, '').replace(/\s+/g, ' ').trim()
-  if (p && p !== 'blue') el.classList.add('palette-' + p)
-  localStorage.setItem('palette', p)
-}
 const MODULES = ['expenses', 'bills', 'installments', 'loans', 'income']
 const TABS = [
   { id: 'general', label: 'General' },
@@ -120,12 +105,8 @@ export default function Settings() {
     mutationFn: updateSettings,
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['settings'] })
-      const theme = data.data.theme || form.theme
-      document.documentElement.classList.remove('dark', 'light')
-      if (theme === 'dark') document.documentElement.classList.add('dark')
-      else if (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) document.documentElement.classList.add('dark')
-      localStorage.setItem('theme', theme)
-      applyPalette(data.data.palette || form.palette)
+      applyTheme(data.data.theme || form.theme)
+      applyAccent(data.data.palette || form.palette)
     },
   })
 
@@ -281,30 +262,59 @@ export default function Settings() {
           </div>
           <div className="space-y-1.5">
             <Label>Theme</Label>
-            <Select value={form.theme} onChange={e => setForm(f => ({ ...f, theme: e.target.value }))} className="w-40">
-              {THEMES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+            <Select value={form.theme} onChange={e => { const t = e.target.value; setForm(f => ({ ...f, theme: t })); applyTheme(t) }} className="w-44">
+              <optgroup label="Mode">
+                {BASE_THEMES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </optgroup>
+              <optgroup label="Skins">
+                {SKINS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </optgroup>
             </Select>
+            <p className="text-xs text-muted-foreground">Skins restyle every surface; your accent colour layers on top.</p>
           </div>
           <div className="space-y-1.5">
-            <Label>Color palette</Label>
-            <div className="flex flex-wrap gap-2.5 pt-1">
-              {PALETTES.map(p => (
+            <Label>Accent colour</Label>
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              {ACCENT_SWATCHES.map(p => (
                 <button
-                  key={p.id}
+                  key={p.hex}
                   type="button"
                   title={p.label}
                   aria-label={p.label}
-                  aria-pressed={form.palette === p.id}
-                  onClick={() => { setForm(f => ({ ...f, palette: p.id })); applyPalette(p.id) }}
+                  aria-pressed={resolveAccent(form.palette) === p.hex}
+                  onClick={() => { setForm(f => ({ ...f, palette: p.hex })); applyAccent(p.hex) }}
                   className={cn(
                     'w-8 h-8 rounded-full ring-offset-2 ring-offset-background transition-transform active:scale-95',
-                    form.palette === p.id ? 'ring-2 ring-foreground scale-110' : 'ring-1 ring-border'
+                    resolveAccent(form.palette) === p.hex ? 'ring-2 ring-foreground scale-110' : 'ring-1 ring-border'
                   )}
-                  style={{ backgroundColor: p.color }}
+                  style={{ backgroundColor: p.hex }}
                 />
               ))}
+              <label
+                className="w-8 h-8 rounded-full ring-1 ring-border ring-offset-2 ring-offset-background overflow-hidden cursor-pointer relative grid place-items-center text-[10px] font-bold text-white"
+                title="Custom colour"
+                style={{ background: 'conic-gradient(red, orange, yellow, lime, cyan, blue, magenta, red)' }}
+              >
+                <span className="drop-shadow">+</span>
+                <input
+                  type="color"
+                  value={resolveAccent(form.palette) || '#3b82f6'}
+                  onChange={e => { const hex = e.target.value; setForm(f => ({ ...f, palette: hex })); applyAccent(hex) }}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => { setForm(f => ({ ...f, palette: 'auto' })); applyAccent('auto') }}
+                className={cn(
+                  'h-8 px-3 rounded-full text-xs ring-offset-2 ring-offset-background',
+                  !resolveAccent(form.palette) ? 'ring-2 ring-foreground bg-secondary' : 'ring-1 ring-border'
+                )}
+              >
+                Auto
+              </button>
             </div>
-            <p className="text-xs text-muted-foreground">Tap to preview; Save to keep it across devices.</p>
+            <p className="text-xs text-muted-foreground">Pick any colour, or Auto to match the theme. Save to keep it across devices.</p>
           </div>
           <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
             {saveMutation.isPending ? 'Saving…' : 'Save Preferences'}
