@@ -9,6 +9,7 @@ import { Modal } from '@/components/shared/Modal'
 import { formatCurrency, RELATIONSHIP_TYPES } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { Plus, Trash2, ChevronRight, Smile, Pencil } from 'lucide-react'
+import { SkeletonList } from '@/components/shared/Loading'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
 import { HexColorPicker, HexColorInput } from 'react-colorful'
@@ -123,7 +124,7 @@ export default function People({ embedded = false }) {
   const [selected, setSelected] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
-  const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
+  const { data: people = [], isLoading } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
   const { data: summary } = useQuery({
     queryKey: ['person-summary', selected],
     queryFn: () => getPersonSummary(selected).then(r => r.data),
@@ -189,7 +190,8 @@ export default function People({ embedded = false }) {
         <Button onClick={() => setShowAdd(true)}><Plus className="w-4 h-4 mr-2" />Add Person</Button>
       </div>
 
-      {people.length === 0 && <p className="text-sm text-muted-foreground">No people added yet.</p>}
+      {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={3} /></CardContent></Card>}
+      {!isLoading && people.length === 0 && <p className="text-sm text-muted-foreground">No people added yet.</p>}
 
       <div className="space-y-2">
         {people.map(p => (

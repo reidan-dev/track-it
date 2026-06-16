@@ -12,6 +12,7 @@ import { TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronUp, 
 import { cn } from '@/lib/utils'
 import { PullToRefresh } from '@/components/shared/PullToRefresh'
 import { useMonthSwipe } from '@/hooks/useMonthSwipe'
+import { LoadingState } from '@/components/shared/Loading'
 
 const SOURCE_LABELS = { loan: 'Loan', bill: 'Bill', installment: 'Installment', expense: 'Expense' }
 
@@ -188,7 +189,7 @@ export default function Summary() {
   })
   const swipe = useMonthSwipe()
 
-  if (isLoading) return <div className="text-muted-foreground">Loading…</div>
+  if (isLoading) return <LoadingState text="Loading summary…" />
   if (!data) return null
 
   const stats = [

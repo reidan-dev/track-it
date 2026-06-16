@@ -12,6 +12,8 @@ import { Modal } from '@/components/shared/Modal'
 import { PersonSelect, personName } from '@/components/shared/PersonSelect'
 import { formatCurrency, INCOME_TYPES, getBillingPeriod } from '@/lib/utils'
 import { Plus, Trash2, Pencil, CalendarClock } from 'lucide-react'
+import { SkeletonList } from '@/components/shared/Loading'
+import { PersonAvatars } from '@/components/shared/PersonAvatars'
 
 const now = new Date()
 const EMPTY_FORM = { source: '', amount: '', date: now.toISOString().slice(0, 10), type: 'Salary', payable_from: null, due_date: '' }
@@ -23,7 +25,7 @@ export default function Income() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
-  const { data: entries = [] } = useQuery({
+  const { data: entries = [], isLoading } = useQuery({
     queryKey: ['income', month, year],
     queryFn: () => getIncome({ month, year }).then(r => r.data),
   })
@@ -74,12 +76,16 @@ export default function Income() {
       </div>
 
       <div className="space-y-2">
-        {entries.length === 0 && <p className="text-sm text-muted-foreground">No income recorded for this period.</p>}
+        {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={3} /></CardContent></Card>}
+        {!isLoading && entries.length === 0 && <p className="text-sm text-muted-foreground">No income recorded for this period.</p>}
         {entries.map(e => (
           <Card key={e.id}>
             <CardContent className="py-3 flex items-center justify-between">
               <div>
-                <p className="font-medium text-sm">{e.source}</p>
+                <p className="font-medium text-sm flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">{e.source}</span>
+                  {e.payable_from != null && <PersonAvatars ids={[e.payable_from]} people={people} roles={{ [e.payable_from]: 'income from' }} title="From" />}
+                </p>
                 <div className="flex gap-2 mt-0.5 flex-wrap items-center">
                   <Badge variant="success">{e.type}</Badge>
                   <span className="text-xs text-muted-foreground">{e.date}</span>

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Numeric, Date, DateTime, ForeignKey, Text, JSON, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -24,6 +24,7 @@ class Expense(Base):
     paid_by = Column(Integer, nullable=True)         # person id who fronted the money; null/0 = Me
     payable_to = Column(Integer, nullable=True)      # person id you owe repayment to
     due_date = Column(Date, nullable=True)           # when repayment is expected
+    is_paid = Column(Boolean, default=False, nullable=False)  # settled/repaid toggle, like bills & installments
 
     user = relationship("User", back_populates="expenses")
     settlements = relationship("ExpenseParticipantSettlement", back_populates="expense", cascade="all, delete-orphan")

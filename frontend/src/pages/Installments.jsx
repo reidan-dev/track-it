@@ -17,6 +17,10 @@ import { Plus, Trash2, CheckCircle, Circle, Pencil, ChevronDown, ChevronUp, User
 import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
 import { usePeriod } from '@/contexts/PeriodContext'
+import { SkeletonList } from '@/components/shared/Loading'
+import { PersonAvatars } from '@/components/shared/PersonAvatars'
+import { involvedPeople } from '@/lib/involved'
+import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
 
 const now = new Date()
 
@@ -68,7 +72,7 @@ export default function Installments() {
   const [openIds, setOpenIds] = useState({})
   const toggleOpen = (id) => setOpenIds(o => ({ ...o, [id]: !o[id] }))
 
-  const { data: installments = [] } = useQuery({
+  const { data: installments = [], isLoading } = useQuery({
     queryKey: ['installments'],
     queryFn: () => getInstallments().then(r => r.data),
   })
@@ -91,6 +95,19 @@ export default function Installments() {
       : isPaidMonthly(inst)
 
   const sortPaidLast = (arr) => [...arr].sort((a, b) => Number(isFullyPaidThisMonth(a)) - Number(isFullyPaidThisMonth(b)))
+
+  // Toggle a participant's share on a monthly installment; auto-pay/unpay this
+  // month's term once everyone has (or no longer has) settled. Biweekly and
+  // completed installments keep manual control.
+  const toggleShareInst = (inst, personId) => {
+    const wasSettled = settledPersonIds(inst, M, Y, null).has(personId)
+    settleMutation.mutate({ id: inst.id, personId, period: null, settled: wasSettled })
+    if (!isSplit(inst) || inst.frequency === 'biweekly' || inst.status === 'completed') return
+    const allPaid = allSettledAfterToggle(inst, M, Y, null, personId, !wasSettled)
+    const paidNow = isPaidMonthly(inst)
+    if (allPaid && !paidNow) payMutation.mutate({ id: inst.id })
+    else if (!allPaid && paidNow) unpayMutation.mutate({ id: inst.id })
+  }
   const periodOf = (inst) => inst.due_day ? getBillingPeriod(parseInt(String(inst.due_day).split(',')[0].trim())) : 1
   const activeList = installments.filter(i => i.status === 'active')
   const completed = installments.filter(i => i.status === 'completed')
@@ -216,7 +233,14 @@ export default function Installments() {
     const completed = inst.status === 'completed'
     const totalAmount = inst.total_amount ?? (inst.total_terms * parseFloat(inst.installment_amount))
     const remaining = (inst.total_terms - inst.terms_paid) * parseFloat(inst.installment_amount)
-    const hasSplit = (inst.participants?.length || 0) > 1
+    const parts = inst.participants || []
+    const hasSplit = parts.length > 1
+    const involved = involvedPeople(inst)
+    const lockPaid = hasSplit && !biweekly && !completed  // monthly split installments auto-pay from settlements
+    const avatarProps = {
+      ids: involved.ids, people, roles: involved.roles, title: 'Involved',
+      ...(lockPaid ? { settleableIds: parts, settledIds: [...settledPersonIds(inst, M, Y, null)], onToggleSettled: (pid) => toggleShareInst(inst, pid) } : {}),
+    }
     const statusLabel = completed ? 'Done' : fullyPaid ? 'Paid' : biweekly ? `${[1,2].filter(p=>isPaidPeriod(inst,p)).length}/2 paid` : 'Unpaid'
 
     return (
@@ -247,12 +271,15 @@ export default function Installments() {
               </div>
             ) : (
               <button
-                onClick={() => fullyPaid
+                onClick={lockPaid ? undefined : () => fullyPaid
                   ? unpayMutation.mutate({ id: inst.id })
                   : payMutation.mutate({ id: inst.id })
                 }
-                title={fullyPaid ? 'Mark unpaid' : 'Mark paid'}
-                className={cn('shrink-0 transition-colors', fullyPaid ? 'text-green-500 hover:text-red-400' : 'text-muted-foreground hover:text-primary')}
+                disabled={lockPaid}
+                title={lockPaid
+                  ? (fullyPaid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
+                  : (fullyPaid ? 'Mark unpaid' : 'Mark paid')}
+                className={cn('shrink-0 transition-colors', fullyPaid ? 'text-green-500' : 'text-muted-foreground', !lockPaid && (fullyPaid ? 'hover:text-red-400' : 'hover:text-primary'), lockPaid && 'cursor-default')}
               >
                 {fullyPaid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
               </button>
@@ -262,6 +289,7 @@ export default function Installments() {
             <button onClick={onToggleOpen} className="flex-1 min-w-0 text-left">
               <div className="flex items-center gap-1.5">
                 <span className="font-medium text-sm truncate">{inst.name}</span>
+                {involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
                 {hasSplit && <Users className="w-3 h-3 text-muted-foreground shrink-0" />}
                 {biweekly && <Badge variant="warning" className="text-[10px]">biweekly</Badge>}
               </div>
@@ -304,7 +332,9 @@ export default function Installments() {
               people={people}
               month={M}
               year={Y}
-              onToggle={(personId, period, settled) => settleMutation.mutate({ id: inst.id, personId, period, settled })}
+              onToggle={(personId, period, settled) => period == null
+                ? toggleShareInst(inst, personId)
+                : settleMutation.mutate({ id: inst.id, personId, period, settled })}
             />
             <div className="flex justify-end gap-1.5 pt-0.5">
               <button onClick={e => openEdit(e, inst)} className="flex items-center gap-1 text-xs px-2 py-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent"><Pencil className="w-3.5 h-3.5" />Edit</button>
@@ -330,7 +360,8 @@ export default function Installments() {
         <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">Paid this month</p><p className="text-lg sm:text-xl font-bold text-green-500 tabular-nums break-words leading-tight">{formatCurrency(paidThisMonth)}</p></CardContent></Card>
       </div>
 
-      {installments.length === 0 && <p className="text-sm text-muted-foreground">No installments yet.</p>}
+      {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={4} /></CardContent></Card>}
+      {!isLoading && installments.length === 0 && <p className="text-sm text-muted-foreground">No installments yet.</p>}
 
       {/* Period 1 */}
       {p1.length > 0 && (

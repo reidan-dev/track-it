@@ -10,6 +10,7 @@ import { Plus, Trash2, Pencil, Star } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
 import { HexColorPicker, HexColorInput } from 'react-colorful'
+import { SkeletonList } from '@/components/shared/Loading'
 
 const DEFAULT_COLORS = ['#6b7280','#ef4444','#f97316','#eab308','#22c55e','#14b8a6','#3b82f6','#8b5cf6','#ec4899']
 
@@ -90,7 +91,7 @@ export default function PaymentMethods({ embedded = false }) {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
-  const { data: methods = [] } = useQuery({
+  const { data: methods = [], isLoading } = useQuery({
     queryKey: ['payment-methods'],
     queryFn: () => getPaymentMethods().then(r => r.data),
   })
@@ -126,7 +127,8 @@ export default function PaymentMethods({ embedded = false }) {
         </Button>
       </div>
 
-      {methods.length === 0 && (
+      {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={3} /></CardContent></Card>}
+      {!isLoading && methods.length === 0 && (
         <p className="text-sm text-muted-foreground">No payment methods yet. Add one to use it across your entries.</p>
       )}
 

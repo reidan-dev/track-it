@@ -16,7 +16,12 @@ import { SplitTracker } from '@/components/shared/SplitTracker'
 import { ReceiptCapture } from '@/components/shared/ReceiptCapture'
 import { SwipeableRow } from '@/components/shared/SwipeableRow'
 import { PullToRefresh } from '@/components/shared/PullToRefresh'
-import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock } from 'lucide-react'
+import { SkeletonList } from '@/components/shared/Loading'
+import { PersonAvatars } from '@/components/shared/PersonAvatars'
+import { involvedPeople } from '@/lib/involved'
+import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
+import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock, CheckCircle, Circle } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
 import { usePeriod } from '@/contexts/PeriodContext'
 
@@ -27,6 +32,18 @@ const EMPTY_FORM = {
   paid_by: null, payable_to: null, due_date: '',
 }
 
+function shareOf(amount, participants, participantAmounts, pid) {
+  if (!amount) return 0
+  const custom = participantAmounts?.[String(pid)]
+  if (custom != null && custom !== '') return parseFloat(custom)
+  return parseFloat(amount) / (participants?.length || 1)
+}
+
+const involvedFor = (e) => involvedPeople(e, {
+  share: (pid) => formatCurrency(shareOf(e.amount, e.participants || [], e.participant_amounts, pid)),
+  payableLabel: 'you owe',
+})
+
 export default function Expenses() {
   const qc = useQueryClient()
   const { month, year } = usePeriod()
@@ -36,7 +53,7 @@ export default function Expenses() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [receiptLoading, setReceiptLoading] = useState(false)
 
-  const { data: expenses = [], refetch } = useQuery({
+  const { data: expenses = [], refetch, isLoading } = useQuery({
     queryKey: ['expenses', month, year, period],
     queryFn: () => getExpenses({ month, year, ...(period ? { period } : {}) }).then(r => r.data),
   })
@@ -62,6 +79,11 @@ export default function Expenses() {
     apply: (list, id) => list.filter(e => e.id !== id),
     also,
   })
+  const paidMutation = useOptimistic(qc, expensesKey, {
+    mutationFn: ({ id, is_paid }) => updateExpense(id, { is_paid }),
+    apply: (list, { id, is_paid }) => list.map(e => (e.id === id ? { ...e, is_paid } : e)),
+    also,
+  })
   const settleMutation = useOptimistic(qc, expensesKey, {
     mutationFn: ({ id, personId, period: prd, settled, m, y }) =>
       settled
@@ -75,6 +97,17 @@ export default function Expenses() {
     } : e)),
     also,
   })
+
+  // Toggle one participant's share. When a split's last person settles, the
+  // whole expense auto-flips to paid; un-settling anyone flips it back.
+  const toggleShare = (e, personId) => {
+    const wasSettled = settledPersonIds(e, e.month, e.year).has(personId)
+    settleMutation.mutate({ id: e.id, personId, period: null, settled: wasSettled, m: e.month, y: e.year })
+    if (!isSplit(e)) return
+    const allPaid = allSettledAfterToggle(e, e.month, e.year, null, personId, !wasSettled)
+    if (allPaid && !e.is_paid) paidMutation.mutate({ id: e.id, is_paid: true })
+    else if (!allPaid && e.is_paid) paidMutation.mutate({ id: e.id, is_paid: false })
+  }
 
   const openEdit = (e) => {
     setForm({
@@ -142,12 +175,21 @@ export default function Expenses() {
           </div>
         </CardHeader>
         <CardContent>
-          {expenses.length === 0
+          {isLoading
+            ? <SkeletonList rows={4} />
+            : expenses.length === 0
             ? <p className="text-sm text-muted-foreground py-4 text-center">No expenses found.</p>
             : (
               <ul className="divide-y divide-border">
                 {expenses.map(e => {
-                  const hasSplit = (e.participants?.length || 0) > 1
+                  const parts = e.participants || []
+                  const hasSplit = parts.length > 1
+                  const involved = involvedFor(e)
+                  const settledIds = [...settledPersonIds(e, e.month, e.year)]
+                  const avatarProps = {
+                    ids: involved.ids, people, roles: involved.roles, title: 'Involved',
+                    ...(hasSplit ? { settleableIds: parts, settledIds, onToggleSettled: (pid) => toggleShare(e, pid) } : {}),
+                  }
                   return (
                     <li key={e.id}>
                       <SwipeableRow actions={[
@@ -156,11 +198,22 @@ export default function Expenses() {
                       ]}>
                         <div className="py-2.5 text-sm">
                           <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              {e.name && <p className="font-medium text-sm truncate">{e.name}</p>}
+                            <button
+                              onClick={hasSplit ? undefined : () => paidMutation.mutate({ id: e.id, is_paid: !e.is_paid })}
+                              disabled={hasSplit}
+                              title={hasSplit
+                                ? (e.is_paid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
+                                : (e.is_paid ? 'Mark unpaid' : 'Mark paid')}
+                              className={cn('shrink-0 transition-colors', e.is_paid ? 'text-green-500' : 'text-muted-foreground', !hasSplit && (e.is_paid ? 'hover:text-red-400' : 'hover:text-primary'), hasSplit && 'cursor-default')}
+                            >
+                              {e.is_paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              {e.name && <p className="font-medium text-sm flex items-center gap-1.5 min-w-0"><span className={cn('truncate', e.is_paid && 'text-muted-foreground line-through')}>{e.name}</span>{involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}</p>}
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Badge variant="muted">{e.category}</Badge>
                                 <span className="text-xs text-muted-foreground">{e.date}</span>
+                                {!e.name && involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
                                 {hasSplit && <Users className="w-3 h-3 text-muted-foreground" />}
                                 {e.has_receipt && <Paperclip className="w-3 h-3 text-muted-foreground" />}
                                 {e.payment_method && <PaymentMethodBadge value={e.payment_method} />}
@@ -176,7 +229,7 @@ export default function Expenses() {
                               {e.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.note}</p>}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <span className="font-medium">{formatCurrency(e.amount)}</span>
+                              <span className={cn('font-medium', e.is_paid && 'text-muted-foreground line-through')}>{formatCurrency(e.amount)}</span>
                               {/* Inline actions on desktop; mobile uses swipe */}
                               <button onClick={() => openEdit(e)} className="hidden sm:inline-flex p-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent">
                                 <Pencil className="w-3.5 h-3.5" />
@@ -192,7 +245,7 @@ export default function Expenses() {
                             people={people}
                             month={e.month}
                             year={e.year}
-                            onToggle={(personId, prd, settled) => settleMutation.mutate({ id: e.id, personId, period: prd, settled, m: e.month, y: e.year })}
+                            onToggle={(personId) => toggleShare(e, personId)}
                           />
                         </div>
                       </SwipeableRow>

@@ -11,6 +11,8 @@ import { Modal } from '@/components/shared/Modal'
 import { formatCurrency } from '@/lib/utils'
 import { Plus, Trash2, Pencil } from 'lucide-react'
 import { useOptimistic, tempId } from '@/lib/optimistic'
+import { SkeletonList } from '@/components/shared/Loading'
+import { PersonAvatars } from '@/components/shared/PersonAvatars'
 
 const EMPTY_FORM = { person_id: '', direction: 'borrowed', principal: '', interest_rate: '', total_terms: '', start_date: new Date().toISOString().slice(0, 10), notes: '' }
 
@@ -24,7 +26,7 @@ export default function Loans() {
   const [payAmount, setPayAmount] = useState('')
   const [payNote, setPayNote] = useState('')
 
-  const { data: loans = [] } = useQuery({ queryKey: ['loans'], queryFn: () => getLoans().then(r => r.data) })
+  const { data: loans = [], isLoading } = useQuery({ queryKey: ['loans'], queryFn: () => getLoans().then(r => r.data) })
   const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
 
   const filtered = loans.filter(l => l.direction === tab)
@@ -123,6 +125,11 @@ export default function Loans() {
         </CardContent>
       </Card>
 
+      {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={3} /></CardContent></Card>}
+      {!isLoading && activeFiltered.length === 0 && settledFiltered.length === 0 && (
+        <p className="text-sm text-muted-foreground">No loans {tab === 'borrowed' ? 'borrowed' : 'lent'} yet.</p>
+      )}
+
       {activeFiltered.map(loan => {
         const person = getPerson(loan.person_id)
         const rem = remaining(loan)
@@ -130,7 +137,10 @@ export default function Loans() {
           <Card key={loan.id}>
             <div className="flex items-center gap-3 px-3 py-2.5">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{person?.name || 'Unknown'}</p>
+                <p className="font-medium text-sm flex items-center gap-1.5 min-w-0">
+                  <span className="truncate">{person?.name || 'Unknown'}</span>
+                  {loan.person_id != null && <PersonAvatars ids={[loan.person_id]} people={people} roles={{ [loan.person_id]: loan.direction === 'borrowed' ? 'you borrowed' : 'you lent' }} title="Loan with" />}
+                </p>
                 <p className="text-xs text-muted-foreground truncate">
                   <span className="text-foreground font-medium">{formatCurrency(rem)}</span> left of {formatCurrency(loan.principal)}
                   {loan.total_terms ? ` · ${loan.terms_paid}/${loan.total_terms} terms` : ''}

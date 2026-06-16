@@ -20,6 +20,7 @@ class ExpenseCreate(BaseModel):
     paid_by: Optional[int] = None
     payable_to: Optional[int] = None
     due_date: Optional[_date] = None
+    is_paid: bool = False
 
 
 class ExpenseUpdate(BaseModel):
@@ -38,6 +39,7 @@ class ExpenseUpdate(BaseModel):
     paid_by: Optional[int] = None
     payable_to: Optional[int] = None
     due_date: Optional[_date] = None
+    is_paid: Optional[bool] = None
 
 
 class ExpenseSettlementOut(BaseModel):
@@ -71,6 +73,7 @@ class ExpenseOut(BaseModel):
     paid_by: Optional[int] = None
     payable_to: Optional[int] = None
     due_date: Optional[_date] = None
+    is_paid: bool = False
     settlements: list[ExpenseSettlementOut] = []
 
     @field_validator("participants", mode="before")

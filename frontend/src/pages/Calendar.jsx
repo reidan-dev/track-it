@@ -8,6 +8,7 @@ import { Badge } from '@/components/shared/Badge'
 import { formatCurrency } from '@/lib/utils'
 import { PullToRefresh } from '@/components/shared/PullToRefresh'
 import { useMonthSwipe } from '@/hooks/useMonthSwipe'
+import { LoadingState } from '@/components/shared/Loading'
 
 const TYPE_COLORS = {
   bill: 'text-blue-500',
@@ -41,7 +42,7 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState(null)
   const [visibleTypes, setVisibleTypes] = useState(new Set(TYPES))
 
-  const { data, refetch } = useQuery({
+  const { data, refetch, isLoading } = useQuery({
     queryKey: ['calendar', month, year],
     queryFn: () => getCalendarEvents(month, year).then(r => r.data),
   })
@@ -96,7 +97,9 @@ export default function CalendarPage() {
 
       {/* Agenda list — mobile only */}
       <div className="md:hidden space-y-3">
-        {days.filter(d => (eventsByDay[d] || []).length > 0).length === 0 ? (
+        {isLoading ? (
+          <LoadingState text="Loading schedule…" />
+        ) : days.filter(d => (eventsByDay[d] || []).length > 0).length === 0 ? (
           <p className="text-sm text-muted-foreground py-6 text-center">Nothing scheduled this month.</p>
         ) : (
           days.filter(d => (eventsByDay[d] || []).length > 0).map(day => {

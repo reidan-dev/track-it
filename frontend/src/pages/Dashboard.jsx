@@ -8,6 +8,7 @@ import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, CartesianGrid,
 } from 'recharts'
+import { LoadingState } from '@/components/shared/Loading'
 
 const CATEGORY_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#6b7280']
 
@@ -51,7 +52,7 @@ export default function Dashboard() {
     queryFn: () => getDashboardTrends(6).then(r => r.data),
   })
 
-  if (loadingSummary || loadingTrends) return <div className="text-muted-foreground">Loading…</div>
+  if (loadingSummary || loadingTrends) return <LoadingState text="Loading dashboard…" />
 
   const series = trends?.series || []
   const categories = summary?.expenses_by_category || []

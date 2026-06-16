@@ -16,6 +16,10 @@ import { Plus, Trash2, CheckCircle, Circle, Pencil, ChevronDown, ChevronUp, User
 import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
 import { usePeriod } from '@/contexts/PeriodContext'
+import { SkeletonList } from '@/components/shared/Loading'
+import { PersonAvatars } from '@/components/shared/PersonAvatars'
+import { involvedPeople } from '@/lib/involved'
+import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
 
 const BILL_CATEGORIES = ['Rent', 'Utilities', 'Subscription', 'Insurance', 'Other']
 const EMPTY_FORM = {
@@ -48,7 +52,7 @@ export default function Bills() {
   const [openIds, setOpenIds] = useState({})
   const toggleOpen = (id) => setOpenIds(o => ({ ...o, [id]: !o[id] }))
 
-  const { data: bills = [] } = useQuery({ queryKey: ['bills'], queryFn: () => getBills().then(r => r.data) })
+  const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: () => getBills().then(r => r.data) })
   const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
 
   const activeBills = bills.filter(b => {
@@ -111,6 +115,18 @@ export default function Bills() {
     ? isPaidPeriod(bill, 1) && isPaidPeriod(bill, 2)
     : isPaidMonthly(bill)
 
+  // Toggle a participant's share on a monthly bill; auto-pay/unpay the bill once
+  // everyone has (or no longer has) settled. Biweekly bills keep manual control.
+  const toggleShareBill = (bill, personId) => {
+    const wasSettled = settledPersonIds(bill, MONTH, YEAR, null).has(personId)
+    settleMutation.mutate({ id: bill.id, personId, period: null, settled: wasSettled })
+    if (!isSplit(bill)) return
+    const allPaid = allSettledAfterToggle(bill, MONTH, YEAR, null, personId, !wasSettled)
+    const paidNow = isPaidMonthly(bill)
+    if (allPaid && !paidNow) payMutation.mutate({ id: bill.id, period: null })
+    else if (!allPaid && paidNow) unpayMutation.mutate({ id: bill.id, period: null })
+  }
+
   const openEdit = (e, bill) => {
     e.stopPropagation()
     setForm({
@@ -166,8 +182,15 @@ export default function Bills() {
   const BillCard = ({ bill, open, onToggleOpen }) => {
     const biweekly = bill.frequency === 'biweekly'
     const paid = isFullyPaid(bill)
-    const hasSplit = (bill.participants?.length || 0) > 1
+    const parts = bill.participants || []
+    const hasSplit = parts.length > 1
     const payee = bill.payable_to ? people.find(p => p.id === bill.payable_to) : null
+    const involved = involvedPeople(bill)
+    const lockPaid = hasSplit && !biweekly  // monthly split bills auto-pay from settlements
+    const avatarProps = {
+      ids: involved.ids, people, roles: involved.roles, title: 'Involved',
+      ...(lockPaid ? { settleableIds: parts, settledIds: [...settledPersonIds(bill, MONTH, YEAR, null)], onToggleSettled: (pid) => toggleShareBill(bill, pid) } : {}),
+    }
     return (
       <Card>
         <div className="flex items-center gap-3 px-3 py-2.5">
@@ -183,12 +206,15 @@ export default function Bills() {
             </div>
           ) : (
             <button
-              onClick={() => paid
+              onClick={lockPaid ? undefined : () => paid
                 ? unpayMutation.mutate({ id: bill.id, period: null })
                 : payMutation.mutate({ id: bill.id, period: null })
               }
-              title={paid ? 'Mark unpaid' : 'Mark paid'}
-              className={cn('shrink-0 transition-colors', paid ? 'text-green-500 hover:text-red-400' : 'text-muted-foreground hover:text-primary')}
+              disabled={lockPaid}
+              title={lockPaid
+                ? (paid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
+                : (paid ? 'Mark unpaid' : 'Mark paid')}
+              className={cn('shrink-0 transition-colors', paid ? 'text-green-500' : 'text-muted-foreground', !lockPaid && (paid ? 'hover:text-red-400' : 'hover:text-primary'), lockPaid && 'cursor-default')}
             >
               {paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
             </button>
@@ -198,6 +224,7 @@ export default function Bills() {
           <button onClick={onToggleOpen} className="flex-1 min-w-0 text-left">
             <div className="flex items-center gap-1.5">
               <span className={cn('font-medium text-sm truncate', paid && 'text-muted-foreground')}>{bill.name}</span>
+              {involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
               {hasSplit && <Users className="w-3 h-3 text-muted-foreground shrink-0" />}
             </div>
             <p className="text-xs text-muted-foreground truncate">
@@ -235,7 +262,9 @@ export default function Bills() {
               people={people}
               month={MONTH}
               year={YEAR}
-              onToggle={(personId, period, settled) => settleMutation.mutate({ id: bill.id, personId, period, settled })}
+              onToggle={(personId, period, settled) => period == null
+                ? toggleShareBill(bill, personId)
+                : settleMutation.mutate({ id: bill.id, personId, period, settled })}
             />
             <div className="flex justify-end gap-1.5 pt-0.5">
               <button onClick={e => openEdit(e, bill)} className="flex items-center gap-1 text-xs px-2 py-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent"><Pencil className="w-3.5 h-3.5" />Edit</button>
@@ -261,7 +290,8 @@ export default function Bills() {
         <Card><CardContent className="pt-4 min-w-0"><p className="text-xs text-muted-foreground truncate">Paid this month</p><p className="text-lg sm:text-xl font-bold text-green-500 tabular-nums break-words leading-tight">{formatCurrency(totalFullyPaid)}</p></CardContent></Card>
       </div>
 
-      {activeBills.length === 0 && <p className="text-sm text-muted-foreground">No active bills.</p>}
+      {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={4} /></CardContent></Card>}
+      {!isLoading && activeBills.length === 0 && <p className="text-sm text-muted-foreground">No active bills.</p>}
 
       {/* Period 1 */}
       {p1Bills.length > 0 && (

@@ -8,6 +8,8 @@ import { Input, Label, Select } from '@/components/shared/Input'
 import { Badge } from '@/components/shared/Badge'
 import { cn } from '@/lib/utils'
 import { BASE_THEMES, SKINS, ACCENT_SWATCHES, applyTheme, applyAccent, resolveAccent } from '@/lib/theme'
+import { AVATAR_STYLES, useAvatarStyle, setAvatarStyle } from '@/lib/avatarStyle'
+import { PersonAvatars } from '@/components/shared/PersonAvatars'
 import People from '@/pages/People'
 import PaymentMethods from '@/pages/PaymentMethods'
 import { SecuritySettings } from '@/components/shared/SecuritySettings'
@@ -73,6 +75,7 @@ export default function Settings() {
   const [form, setForm] = useState({ currency: 'PHP', theme: 'system', palette: 'blue', telegram_bot_token: '', telegram_chat_id: '', telegram_enabled: false, ...REMINDER_DEFAULTS })
   const [testMsg, setTestMsg] = useState('')
   const [reminderMsg, setReminderMsg] = useState('')
+  const avatarStyle = useAvatarStyle()
   const [exportStatus, setExportStatus] = useState('')
 
   useEffect(() => {
@@ -315,6 +318,33 @@ export default function Settings() {
               </button>
             </div>
             <p className="text-xs text-muted-foreground">Pick any colour, or Auto to match the theme. Save to keep it across devices.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>People avatars</Label>
+            <div className="flex items-center gap-3 flex-wrap pt-1">
+              <div className="inline-flex rounded-lg border border-border p-0.5">
+                {AVATAR_STYLES.map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setAvatarStyle(s.id)}
+                    className={cn(
+                      'px-3 py-1 rounded-md text-xs transition-colors',
+                      avatarStyle === s.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <PersonAvatars
+                ids={[0, 1, 2]}
+                people={[{ id: 1, name: 'Alex', color: '#f43f5e', emoji: '🦊' }, { id: 2, name: 'Sam', color: '#10b981', emoji: '🐢' }]}
+                size={22}
+                title="Preview"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">How people show up beside bills, expenses, and more. Applies instantly on this device.</p>
           </div>
           <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
             {saveMutation.isPending ? 'Saving…' : 'Save Preferences'}
