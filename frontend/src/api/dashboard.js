@@ -8,3 +8,7 @@ export const getDashboardTrends = (months = 6) =>
 
 export const getCalendarEvents = (month, year) =>
   api.get('/calendar/events', { params: { month, year } })
+
+// items: [{ type, id, direction, person_id, settle_period, amount? }]
+export const settleUp = (month, year, items) =>
+  api.post('/dashboard/settle', { month, year, items })

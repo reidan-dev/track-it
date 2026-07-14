@@ -71,4 +71,7 @@ class UserSettings(Base):
     digest_weekday = Column(Integer, default=0)          # 0=Mon .. 6=Sun (weekly only)
     digest_last_sent = Column(String, nullable=True)     # "YYYY-MM-DD" dedup stamp
 
+    # Monthly spending caps per expense category: {"Food": 6000, ...}
+    category_budgets = Column(JSON, nullable=True)
+
     user = relationship("User", back_populates="settings")

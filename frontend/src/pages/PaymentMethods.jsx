@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
 import { Input, Label } from '@/components/shared/Input'
 import { Modal } from '@/components/shared/Modal'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { Plus, Trash2, Pencil, Star } from 'lucide-react'
 import Picker from '@emoji-mart/react'
 import data from '@emoji-mart/data'
@@ -14,7 +14,7 @@ import { SkeletonList } from '@/components/shared/Loading'
 
 const DEFAULT_COLORS = ['#6b7280','#ef4444','#f97316','#eab308','#22c55e','#14b8a6','#3b82f6','#8b5cf6','#ec4899']
 
-const EMPTY_FORM = { name: '', icon: '', color: '#6b7280', is_default: false }
+const EMPTY_FORM = { name: '', icon: '', color: '#6b7280', is_default: false, balance: '' }
 
 function MethodIcon({ method, size = 'md' }) {
   const sizeClass = size === 'lg' ? 'w-10 h-10 text-xl' : 'w-8 h-8 text-sm'
@@ -102,7 +102,7 @@ export default function PaymentMethods({ embedded = false }) {
   const delMutation = useMutation({ mutationFn: deletePaymentMethod, onSuccess: invalidate })
 
   const openEdit = (m) => {
-    setForm({ name: m.name, icon: m.icon || '', color: m.color || '#6b7280', is_default: m.is_default })
+    setForm({ name: m.name, icon: m.icon || '', color: m.color || '#6b7280', is_default: m.is_default, balance: m.balance ?? '' })
     setEditingId(m.id)
     setShowForm(true)
   }
@@ -111,8 +111,13 @@ export default function PaymentMethods({ embedded = false }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (editingId) editMutation.mutate({ id: editingId, data: form })
-    else addMutation.mutate(form)
+    const { balance, ...rest } = form
+    const editing = editingId ? methods.find(m => m.id === editingId) : null
+    const data = { ...rest }
+    // Only send balance when it actually changed — sending re-anchors "as of now".
+    if (balance !== '' && parseFloat(balance) !== (editing?.balance ?? null)) data.balance = parseFloat(balance)
+    if (editingId) editMutation.mutate({ id: editingId, data })
+    else addMutation.mutate(data)
   }
 
   return (
@@ -147,7 +152,12 @@ export default function PaymentMethods({ embedded = false }) {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground font-mono">{m.color}</p>
+                  {m.current_balance != null
+                    ? <p className={cn('text-xs tabular-nums font-medium', m.current_balance < 0 ? 'text-red-500' : 'text-muted-foreground')}>
+                        {formatCurrency(m.current_balance)} left
+                        {m.spent_since_anchor > 0 && <span className="text-muted-foreground font-normal"> · {formatCurrency(m.spent_since_anchor)} spent since set</span>}
+                      </p>
+                    : <p className="text-xs text-muted-foreground">No balance set</p>}
                 </div>
               </div>
               <div className="flex items-center gap-1">
@@ -194,6 +204,13 @@ export default function PaymentMethods({ embedded = false }) {
           <div className="space-y-1.5">
             <Label>Color</Label>
             <ColorPicker value={form.color} onChange={v => setForm(f => ({ ...f, color: v }))} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Balance <span className="text-muted-foreground text-xs">(what's in this account right now — optional)</span></Label>
+            <Input type="number" inputMode="decimal" step="0.01" value={form.balance}
+              onChange={e => setForm(f => ({ ...f, balance: e.target.value }))} placeholder="e.g. 5000" />
+            <p className="text-xs text-muted-foreground">Expenses you log with this method count down from it automatically.</p>
           </div>
 
           <label className="flex items-center gap-2 cursor-pointer">

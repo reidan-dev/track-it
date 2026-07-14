@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { HelpTip } from '@/components/shared/HelpTip'
+import { useEffect, useState } from 'react'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { SegmentedControl } from '@/components/shared/SegmentedControl'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getExpenses, createExpense, updateExpense, deleteExpense, settleExpenseParticipant, unsettleExpenseParticipant, getExpenseReceipt } from '@/api/expenses'
+import { getExpenses, searchExpenses, createExpense, updateExpense, deleteExpense, settleExpenseParticipant, unsettleExpenseParticipant, getExpenseReceipt } from '@/api/expenses'
 import { getPeople } from '@/api/people'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
@@ -20,7 +21,7 @@ import { SkeletonList } from '@/components/shared/Loading'
 import { PersonAvatars } from '@/components/shared/PersonAvatars'
 import { involvedPeople } from '@/lib/involved'
 import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
-import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock, CheckCircle, Circle } from 'lucide-react'
+import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock, CheckCircle, Circle, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
 import { usePeriod } from '@/contexts/PeriodContext'
@@ -39,6 +40,10 @@ function shareOf(amount, participants, participantAmounts, pid) {
   return parseFloat(amount) / (participants?.length || 1)
 }
 
+// The person I owe for this expense: whoever fronted it, or an explicit payee
+// on older entries. null = nobody (I paid it myself).
+const creditorOf = (e) => e.payable_to ?? (e.paid_by && e.paid_by !== ME_ID ? e.paid_by : null)
+
 const involvedFor = (e) => involvedPeople(e, {
   share: (pid) => formatCurrency(shareOf(e.amount, e.participants || [], e.participant_amounts, pid)),
   payableLabel: 'you owe',
@@ -52,11 +57,25 @@ export default function Expenses() {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [receiptLoading, setReceiptLoading] = useState(false)
+  const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
 
-  const { data: expenses = [], refetch, isLoading } = useQuery({
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+  const searching = debounced.length > 0
+
+  const { data: monthExpenses = [], refetch, isLoading } = useQuery({
     queryKey: ['expenses', month, year, period],
     queryFn: () => getExpenses({ month, year, ...(period ? { period } : {}) }).then(r => r.data),
   })
+  const { data: searchResults = [], isLoading: searchLoading } = useQuery({
+    queryKey: ['expenses-search', debounced],
+    queryFn: () => searchExpenses({ q: debounced }).then(r => r.data),
+    enabled: searching,
+  })
+  const expenses = searching ? searchResults : monthExpenses
   const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
 
   const expensesKey = ['expenses', month, year, period]
@@ -100,10 +119,12 @@ export default function Expenses() {
 
   // Toggle one participant's share. When a split's last person settles, the
   // whole expense auto-flips to paid; un-settling anyone flips it back.
+  // Expenses someone else fronted are exempt: there, is_paid means "I repaid
+  // them" and is toggled manually, independent of participants' shares.
   const toggleShare = (e, personId) => {
     const wasSettled = settledPersonIds(e, e.month, e.year).has(personId)
     settleMutation.mutate({ id: e.id, personId, period: null, settled: wasSettled, m: e.month, y: e.year })
-    if (!isSplit(e)) return
+    if (!isSplit(e) || creditorOf(e)) return
     const allPaid = allSettledAfterToggle(e, e.month, e.year, null, personId, !wasSettled)
     if (allPaid && !e.is_paid) paidMutation.mutate({ id: e.id, is_paid: true })
     else if (!allPaid && e.is_paid) paidMutation.mutate({ id: e.id, is_paid: false })
@@ -120,8 +141,10 @@ export default function Expenses() {
       participants: e.participants?.length ? e.participants : [ME_ID],
       participant_amounts: e.participant_amounts || {},
       receipt_image: null,
-      paid_by: e.paid_by ?? null,
-      payable_to: e.payable_to ?? null,
+      // Legacy entries may have payable_to without paid_by — treat either as
+      // "this person fronted it" so the Who-paid control picks them up.
+      paid_by: creditorOf(e),
+      payable_to: null,
       due_date: e.due_date || '',
     })
     setEditingId(e.id)
@@ -141,7 +164,15 @@ export default function Expenses() {
   const handleSubmit = (e) => {
     e.preventDefault()
     const d = new Date(form.date)
-    const payload = { ...form, amount: parseFloat(form.amount), due_date: form.due_date || null, period: getBillingPeriod(d.getDate()), month: d.getMonth() + 1, year: d.getFullYear() }
+    const fronted = form.paid_by && form.paid_by !== ME_ID ? form.paid_by : null
+    const payload = {
+      ...form,
+      amount: parseFloat(form.amount),
+      paid_by: fronted,
+      payable_to: fronted, // I owe whoever fronted it; both fields stay in sync
+      due_date: fronted && form.due_date ? form.due_date : null,
+      period: getBillingPeriod(d.getDate()), month: d.getMonth() + 1, year: d.getFullYear(),
+    }
     if (editingId) editMutation.mutate({ id: editingId, data: payload })
     else addMutation.mutate(payload)
   }
@@ -151,39 +182,59 @@ export default function Expenses() {
   return (
     <PullToRefresh onRefresh={refetch}>
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold flex items-center gap-1.5">Expenses <HelpTip text="Log spending by category and payment method. Add participants to split a cost and track who pays you back." /></h1>
+      <PageHeader
+        title="Expenses"
+        help="Log spending by category and payment method. Add participants to split a cost, or record who fronted it so it shows up in your balances."
+      >
         <Button onClick={() => { setShowForm(true); setEditingId(null); setForm(EMPTY_FORM) }}>
           <Plus className="w-4 h-4 mr-2" />Add Expense
         </Button>
-      </div>
+      </PageHeader>
 
-      <div className="flex gap-2">
-        {[null, 1, 2].map(p => (
-          <button key={p} onClick={() => setPeriod(p)}
-            className={`px-3 py-1 rounded text-sm ${period === p ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'}`}>
-            {p === null ? 'All' : (p === 1 ? '1st–15th' : '16th–end')}
-          </button>
-        ))}
+      <div className="flex items-center gap-2 flex-wrap">
+        <SegmentedControl
+          options={[{ value: null, label: 'All' }, { value: 1, label: '1st–15th' }, { value: 2, label: '16th–end' }]}
+          value={period}
+          onChange={setPeriod}
+        />
+        <div className="relative flex-1 min-w-[180px] max-w-xs ml-auto">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search all months…"
+            className="w-full h-9 rounded-lg border border-input bg-card pl-8 pr-8 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm">Total</CardTitle>
+            <CardTitle className="text-sm">{searching ? `Results for “${debounced}” · all months` : 'Total'}</CardTitle>
             <span className="text-lg font-bold">{formatCurrency(total)}</span>
           </div>
         </CardHeader>
         <CardContent>
-          {isLoading
+          {(searching ? searchLoading : isLoading)
             ? <SkeletonList rows={4} />
             : expenses.length === 0
-            ? <p className="text-sm text-muted-foreground py-4 text-center">No expenses found.</p>
+            ? <p className="text-sm text-muted-foreground py-4 text-center">{searching ? 'No matches across any month.' : 'No expenses found.'}</p>
             : (
               <ul className="divide-y divide-border">
                 {expenses.map(e => {
                   const parts = e.participants || []
                   const hasSplit = parts.length > 1
+                  const creditor = creditorOf(e)
+                  // With a creditor, the check toggle means "I repaid them" and
+                  // is always manual; otherwise splits auto-track settlements.
+                  const manualToggle = !hasSplit || !!creditor
                   const involved = involvedFor(e)
                   const settledIds = [...settledPersonIds(e, e.month, e.year)]
                   const avatarProps = {
@@ -199,12 +250,14 @@ export default function Expenses() {
                         <div className="py-2.5 text-sm">
                           <div className="flex items-center justify-between gap-2">
                             <button
-                              onClick={hasSplit ? undefined : () => paidMutation.mutate({ id: e.id, is_paid: !e.is_paid })}
-                              disabled={hasSplit}
-                              title={hasSplit
+                              onClick={manualToggle ? () => paidMutation.mutate({ id: e.id, is_paid: !e.is_paid }) : undefined}
+                              disabled={!manualToggle}
+                              title={creditor
+                                ? (e.is_paid ? `Repaid ${personName(people, creditor)} — tap to undo` : `Tap once you've repaid ${personName(people, creditor)}`)
+                                : hasSplit
                                 ? (e.is_paid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
                                 : (e.is_paid ? 'Mark unpaid' : 'Mark paid')}
-                              className={cn('shrink-0 transition-colors', e.is_paid ? 'text-green-500' : 'text-muted-foreground', !hasSplit && (e.is_paid ? 'hover:text-red-400' : 'hover:text-primary'), hasSplit && 'cursor-default')}
+                              className={cn('shrink-0 transition-colors', e.is_paid ? 'text-green-500' : 'text-muted-foreground', manualToggle && (e.is_paid ? 'hover:text-red-400' : 'hover:text-primary'), !manualToggle && 'cursor-default')}
                             >
                               {e.is_paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
                             </button>
@@ -218,12 +271,16 @@ export default function Expenses() {
                                 {e.has_receipt && <Paperclip className="w-3 h-3 text-muted-foreground" />}
                                 {e.payment_method && <PaymentMethodBadge value={e.payment_method} />}
                               </div>
-                              {(e.paid_by || e.payable_to || e.due_date) && (
-                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-xs text-muted-foreground">
-                                  <CalendarClock className="w-3 h-3 shrink-0" />
-                                  {e.paid_by ? <span>paid by {personName(people, e.paid_by)}</span> : null}
-                                  {e.payable_to ? <span>· owe {personName(people, e.payable_to)}</span> : null}
-                                  {e.due_date ? <span>· due {e.due_date}</span> : null}
+                              {creditor && (
+                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-xs">
+                                  <CalendarClock className="w-3 h-3 shrink-0 text-muted-foreground" />
+                                  <span className="text-muted-foreground">{personName(people, creditor)} fronted it</span>
+                                  {e.is_paid
+                                    ? <span className="text-green-600 dark:text-green-400 font-medium">· repaid</span>
+                                    : <>
+                                        <span className="text-red-500 font-medium">· you owe {formatCurrency(e.amount)}</span>
+                                        {e.due_date && <span className="text-muted-foreground">· by {e.due_date}</span>}
+                                      </>}
                                 </div>
                               )}
                               {e.note && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.note}</p>}
@@ -286,19 +343,42 @@ export default function Expenses() {
             <Label>Transaction date</Label>
             <Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Paid by <span className="text-muted-foreground text-xs">(who fronted it)</span></Label>
-              <PersonSelect value={form.paid_by} onChange={v => setForm(f => ({ ...f, paid_by: v }))} people={people} includeMe />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Payable to <span className="text-muted-foreground text-xs">(who you owe)</span></Label>
-              <PersonSelect value={form.payable_to} onChange={v => setForm(f => ({ ...f, payable_to: v }))} people={people} />
-            </div>
-          </div>
           <div className="space-y-1.5">
-            <Label>Due date <span className="text-muted-foreground text-xs">(when you repay — optional)</span></Label>
-            <Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
+            <Label>Who paid?</Label>
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted">
+              {[
+                { key: 'me', label: 'I paid' },
+                { key: 'other', label: 'Someone else' },
+              ].map(opt => {
+                const active = (opt.key === 'me') === !form.paid_by
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, paid_by: opt.key === 'me' ? null : (f.paid_by || people[0]?.id || null), due_date: opt.key === 'me' ? '' : f.due_date }))}
+                    className={cn('h-9 rounded-md text-sm font-medium transition-colors',
+                      active ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground')}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+            {people.length === 0 && (
+              <p className="text-xs text-muted-foreground">Add people in the People page to track who fronted an expense.</p>
+            )}
+            {form.paid_by ? (
+              <div className="space-y-2 rounded-lg border border-border p-3 mt-1">
+                <div className="space-y-1.5">
+                  <Label>Who fronted it? <span className="text-muted-foreground text-xs">(you'll owe them the full amount)</span></Label>
+                  <PersonSelect value={form.paid_by} onChange={v => setForm(f => ({ ...f, paid_by: v }))} people={people} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Repay by <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                  <Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="space-y-1.5">
             <Label>Note (optional)</Label>

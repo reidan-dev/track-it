@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { HelpTip } from '@/components/shared/HelpTip'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { SegmentedControl } from '@/components/shared/SegmentedControl'
 import { usePeriod } from '@/contexts/PeriodContext'
-import { useQuery } from '@tanstack/react-query'
-import { getDashboardSummary } from '@/api/dashboard'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { getDashboardSummary, settleUp } from '@/api/dashboard'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
 import { Badge } from '@/components/shared/Badge'
 import { Button } from '@/components/shared/Button'
 import { Modal } from '@/components/shared/Modal'
 import { formatCurrency } from '@/lib/utils'
-import { TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronUp, ImageDown, Download } from 'lucide-react'
+import { TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronUp, ImageDown, Download, HandCoins } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PullToRefresh } from '@/components/shared/PullToRefresh'
 import { useMonthSwipe } from '@/hooks/useMonthSwipe'
@@ -116,7 +117,7 @@ function PersonAvatar({ person }) {
   )
 }
 
-function PersonBalanceRow({ person }) {
+function PersonBalanceRow({ person, onSettle }) {
   const [open, setOpen] = useState(false)
   const displayName = person.nickname || person.name
   const net = person.net
@@ -164,9 +165,123 @@ function PersonBalanceRow({ person }) {
               </div>
             )
           })}
+          <Button size="sm" variant="outline" className="w-full mt-1" onClick={() => onSettle(person)}>
+            <HandCoins className="w-3.5 h-3.5 mr-1.5" />Settle up
+          </Button>
         </div>
       )}
     </div>
+  )
+}
+
+// ── Settle-up modal: pick which of a person's items a payment covers ─────────
+function SettleUpModal({ person, month, year, onClose }) {
+  const qc = useQueryClient()
+  const [checked, setChecked] = useState(() => new Set(person.sources.map((_, i) => i)))
+  const [loanAmounts, setLoanAmounts] = useState({}) // source index → amount string
+
+  const mutation = useMutation({
+    mutationFn: (items) => settleUp(month, year, items),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+      qc.invalidateQueries({ queryKey: ['expenses'] })
+      qc.invalidateQueries({ queryKey: ['bills'] })
+      qc.invalidateQueries({ queryKey: ['installments'] })
+      qc.invalidateQueries({ queryKey: ['loans'] })
+      onClose()
+    },
+  })
+
+  const toggle = (i) => setChecked(s => {
+    const n = new Set(s)
+    n.has(i) ? n.delete(i) : n.add(i)
+    return n
+  })
+
+  const amountFor = (s, i) => {
+    if (s.type === 'loan' && loanAmounts[i] !== undefined && loanAmounts[i] !== '') {
+      return Math.min(parseFloat(loanAmounts[i]) || 0, s.amount)
+    }
+    return s.amount
+  }
+
+  // What this settle-up nets out to: their payments to me minus mine to them.
+  const total = person.sources.reduce((sum, s, i) => {
+    if (!checked.has(i)) return sum
+    return sum + (s.direction === 'owed_to_me' ? amountFor(s, i) : -amountFor(s, i))
+  }, 0)
+
+  const submit = () => {
+    const items = person.sources
+      .map((s, i) => ({ s, i }))
+      .filter(({ i }) => checked.has(i))
+      .map(({ s, i }) => ({
+        type: s.type,
+        id: s.id,
+        direction: s.direction,
+        person_id: person.person_id,
+        settle_period: s.settle_period ?? null,
+        ...(s.type === 'loan' ? { amount: amountFor(s, i) } : {}),
+      }))
+    if (items.length) mutation.mutate(items)
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Settle up · ${person.nickname || person.name}`}
+      footer={
+        <div className="flex items-center justify-between gap-2 w-full">
+          <span className={cn('text-sm font-semibold tabular-nums', total >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
+            {total >= 0 ? 'They pay you ' : 'You pay '}{formatCurrency(Math.abs(total))}
+          </span>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={submit} disabled={checked.size === 0 || mutation.isPending}>
+              {mutation.isPending ? 'Saving…' : 'Record'}
+            </Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">
+          Tick what this payment covers. Items are marked settled; loans get a payment recorded.
+        </p>
+        <div className="space-y-1 max-h-80 overflow-y-auto">
+          {person.sources.map((s, i) => {
+            const owed = s.direction === 'owed_to_me'
+            return (
+              <label key={i} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent cursor-pointer">
+                <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)}
+                  className="w-4 h-4 rounded border-border shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
+                    <span className="text-sm truncate">{s.label}</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    {owed ? 'they owe you' : 'you owe them'}
+                  </span>
+                </div>
+                {s.type === 'loan' && checked.has(i) ? (
+                  <input
+                    type="number" inputMode="decimal" step="0.01" min="0" max={s.amount}
+                    value={loanAmounts[i] ?? ''}
+                    placeholder={String(s.amount)}
+                    onClick={e => e.preventDefault()}
+                    onChange={e => setLoanAmounts(a => ({ ...a, [i]: e.target.value }))}
+                    className="w-24 h-8 rounded-md border border-input bg-background px-2 text-sm text-right shrink-0"
+                  />
+                ) : (
+                  <span className={cn('text-sm font-medium tabular-nums shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
+                    {owed ? '' : '−'}{formatCurrency(s.amount)}
+                  </span>
+                )}
+              </label>
+            )
+          })}
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -183,6 +298,7 @@ export default function Summary() {
   const [imagePeriod, setImagePeriod] = useState('all')
   const [selected, setSelected] = useState(new Set())
   const [copyMsg, setCopyMsg] = useState('')
+  const [settlePerson, setSettlePerson] = useState(null)
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['dashboard', month, year],
     queryFn: () => getDashboardSummary(month, year).then(r => r.data),
@@ -193,10 +309,10 @@ export default function Summary() {
   if (!data) return null
 
   const stats = [
-    { label: 'Income', value: data.total_income, icon: TrendingUp, color: 'text-green-500' },
-    { label: 'Expenses', value: data.total_expenses, icon: TrendingDown, color: 'text-red-500' },
-    { label: 'Bills', value: data.total_bills, icon: AlertCircle, color: 'text-blue-500' },
-    { label: 'Installments', value: data.total_installments, icon: Wallet, color: 'text-orange-500' },
+    { label: 'Income', value: data.total_income, icon: TrendingUp, color: 'text-green-600 dark:text-green-400', chip: 'bg-green-500/10' },
+    { label: 'Expenses', value: data.total_expenses, icon: TrendingDown, color: 'text-red-500', chip: 'bg-red-500/10' },
+    { label: 'Bills', value: data.total_bills, icon: AlertCircle, color: 'text-blue-500', chip: 'bg-blue-500/10' },
+    { label: 'Installments', value: data.total_installments, icon: Wallet, color: 'text-orange-500', chip: 'bg-orange-500/10' },
   ]
 
   // Build a single net balance per person from their sources, scoped to a period.
@@ -278,44 +394,47 @@ export default function Summary() {
   return (
     <PullToRefresh onRefresh={refetch}>
     <div {...swipe()} style={{ touchAction: 'pan-y' }} className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-1.5">Summary <HelpTip text="This month at a glance: your net cash, category totals, who owes you (and whom you owe), and what's due in the next 7 days." /></h1>
-        <p className="text-muted-foreground text-sm">
-          {new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
-        </p>
-      </div>
+      <PageHeader
+        title="Summary"
+        help="This month at a glance: your net cash, category totals, who owes you (and whom you owe), and what's due in the next 7 days."
+        subtitle={new Date(year, month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
+      />
 
-      {/* Net cash position */}
-      <Card className={`border-2 ${data.net_cash_mine >= 0 ? 'border-green-500/30' : 'border-red-500/30'}`}>
-        <CardContent className="pt-6">
+      {/* Net cash "wallet card" — the app's signature surface. Derives fully
+          from --primary so every theme skin recolors it. */}
+      <div
+        className="relative overflow-hidden rounded-2xl text-primary-foreground shadow-lg shadow-primary/25"
+        style={{ background: 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary) / 0.72) 100%)' }}
+      >
+        <Wallet className="absolute -right-5 -bottom-6 w-36 h-36 opacity-[0.12] rotate-[-8deg] pointer-events-none" />
+        <div className="relative p-5 sm:p-6">
           <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-muted-foreground">My Net Cash</p>
-              <p className={`text-3xl font-bold ${data.net_cash_mine >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {formatCurrency(data.net_cash_mine)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">after my share of bills, installments & expenses</p>
-            </div>
-            <Badge variant={data.net_cash_mine >= 0 ? 'success' : 'danger'}>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-85">My net cash</p>
+            <span className={cn('text-[11px] font-semibold px-2 py-0.5 rounded-full',
+              data.net_cash_mine >= 0 ? 'bg-primary-foreground/15' : 'bg-red-950/30')}>
               {data.net_cash_mine >= 0 ? 'Positive' : 'Negative'}
-            </Badge>
-          </div>
-          <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">If I front everyone's full share</span>
-            <span className={`font-semibold ${data.net_position >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
-              {formatCurrency(data.net_position)}
             </span>
           </div>
-        </CardContent>
-      </Card>
+          <p className="text-4xl font-bold tabular-nums mt-2 tracking-tight">
+            {formatCurrency(data.net_cash_mine)}
+          </p>
+          <p className="text-xs opacity-75 mt-1">after my share of bills, installments & expenses</p>
+          <div className="mt-5 pt-3 border-t border-primary-foreground/20 flex items-center justify-between text-sm">
+            <span className="opacity-80">If I front everyone's full share</span>
+            <span className="font-semibold tabular-nums">{formatCurrency(data.net_position)}</span>
+          </div>
+        </div>
+      </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map(({ label, value, icon: Icon, color }) => (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {stats.map(({ label, value, icon: Icon, color, chip }) => (
           <Card key={label}>
             <CardContent className="pt-4 pb-4 min-w-0">
-              <div className="flex items-center gap-2 mb-1 min-w-0">
-                <Icon className={`w-4 h-4 shrink-0 ${color}`} />
+              <div className="flex items-center gap-2 mb-2 min-w-0">
+                <span className={cn('w-7 h-7 rounded-lg flex items-center justify-center shrink-0', chip)}>
+                  <Icon className={`w-4 h-4 shrink-0 ${color}`} />
+                </span>
                 <span className="text-xs text-muted-foreground truncate">{label}</span>
               </div>
               <p className="text-lg sm:text-xl font-semibold tabular-nums break-words leading-tight">{formatCurrency(value)}</p>
@@ -329,20 +448,7 @@ export default function Summary() {
         <div className="space-y-3">
           {/* Period toggle + image export */}
           <div className="flex gap-1.5 items-center">
-            {PERIOD_OPTIONS.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setPeriod(opt.value)}
-                className={cn(
-                  'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                  period === opt.value
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-accent'
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+            <SegmentedControl options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />
             <Button size="sm" variant="outline" className="ml-auto" onClick={openPicker} disabled={balances.length === 0}>
               <ImageDown className="w-4 h-4 mr-1.5" />Summary image
             </Button>
@@ -359,7 +465,7 @@ export default function Summary() {
             </CardHeader>
             <CardContent className="space-y-2">
               {balances.length > 0
-                ? balances.map(p => <PersonBalanceRow key={p.person_id} person={p} />)
+                ? balances.map(p => <PersonBalanceRow key={p.person_id} person={p} onSettle={setSettlePerson} />)
                 : <p className="text-sm text-muted-foreground">Nothing for this period.</p>
               }
             </CardContent>
@@ -412,6 +518,10 @@ export default function Summary() {
         )}
       </div>
 
+      {settlePerson && (
+        <SettleUpModal person={settlePerson} month={month} year={year} onClose={() => setSettlePerson(null)} />
+      )}
+
       {/* People picker → table image */}
       <Modal open={showPicker} onClose={() => setShowPicker(false)} title="Summary image"
         footer={
@@ -429,22 +539,7 @@ export default function Summary() {
         <div className="space-y-3">
           <div>
             <p className="text-sm text-muted-foreground mb-1.5">Which period to summarize:</p>
-            <div className="flex gap-1.5">
-              {PERIOD_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => pickImagePeriod(opt.value)}
-                  className={cn(
-                    'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                    imagePeriod === opt.value
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground hover:bg-accent'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl options={PERIOD_OPTIONS} value={imagePeriod} onChange={pickImagePeriod} />
           </div>
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">Pick who to include.</p>

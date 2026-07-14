@@ -3,12 +3,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Optional
+from pydantic import BaseModel
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.expense import Expense, ExpenseParticipantSettlement
-from app.models.installment import Installment, InstallmentPayment
-from app.models.bill import Bill, BillPayment
+from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
+from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.loan import Loan
 from app.models.income import Income
 from app.models.person import Person
@@ -197,7 +199,7 @@ def get_summary(
         if remaining <= 0:
             continue
         direction = "owed_to_me" if loan.direction == "lent" else "i_owe"
-        _add(loan.person_id, direction, "loan", "Loan", remaining, None)
+        _add(loan.person_id, direction, "loan", "Loan", remaining, None, id=loan.id)
 
     # 2. Bills this month
     bill_payments_this_month = db.query(BillPayment).filter(
@@ -211,6 +213,14 @@ def get_summary(
             for bp in bill_payments_this_month
         )
 
+    bill_settled = {
+        (s.bill_id, s.person_id, s.period)
+        for s in db.query(BillParticipantSettlement).filter(
+            BillParticipantSettlement.month == m, BillParticipantSettlement.year == y,
+            BillParticipantSettlement.bill_id.in_([b.id for b in active_bills]),
+        ).all()
+    } if active_bills else set()
+
     for bill in active_bills:
         parts = bill.participants or []
         non_me = [p for p in parts if p != ME_ID]
@@ -220,14 +230,19 @@ def get_summary(
             paid_check = period if bill.frequency == "biweekly" else None
             if _bill_paid(bill.id, paid_check):
                 continue
-            # other participants owe me their share
+            settle_period = period if bill.frequency == "biweekly" else None
+            # other participants owe me their unsettled share
             for pid in non_me:
+                if (bill.id, pid, settle_period) in bill_settled:
+                    continue
                 share = _participant_share(bill.amount, parts, bill.participant_amounts, pid)
-                _add(pid, "owed_to_me", "bill", bill.name, share, period, split=split)
-            # i owe the payee my share
+                _add(pid, "owed_to_me", "bill", bill.name, share, period, split=split,
+                     id=bill.id, settle_period=settle_period)
+            # I owe the payee the full amount (they front/receive it);
+            # participants' shares above are what I collect back.
             if bill.payable_to:
-                ms = _my_share(bill.amount, parts, bill.participant_amounts)
-                _add(bill.payable_to, "i_owe", "bill", bill.name, ms, period, split=split)
+                _add(bill.payable_to, "i_owe", "bill", bill.name, bill.amount, period, split=split,
+                     id=bill.id, settle_period=paid_check)
 
     # 3. Installments this month — other participants' unpaid shares
     inst_payments_this_month = db.query(InstallmentPayment).filter(
@@ -241,6 +256,15 @@ def get_summary(
             for ip in inst_payments_this_month
         )
 
+    inst_settled = {
+        (s.installment_id, s.person_id, s.period)
+        for s in db.query(InstallmentParticipantSettlement).filter(
+            InstallmentParticipantSettlement.month == m,
+            InstallmentParticipantSettlement.year == y,
+            InstallmentParticipantSettlement.installment_id.in_([i.id for i in active_installments]),
+        ).all()
+    } if active_installments else set()
+
     for inst in active_installments:
         parts = inst.participants or []
         non_me = [p for p in parts if p != ME_ID]
@@ -252,10 +276,14 @@ def get_summary(
             paid_check = period if inst.frequency == "biweekly" else None
             if _inst_paid(inst.id, paid_check):
                 continue
+            settle_period = period if inst.frequency == "biweekly" else None
             for pid in non_me:
+                if (inst.id, pid, settle_period) in inst_settled:
+                    continue
                 share = _participant_share(inst.installment_amount, parts, inst.participant_amounts, pid)
                 _add(pid, "owed_to_me", "installment", inst.name, share, period,
-                     term=term, total_terms=inst.total_terms, split=True)
+                     term=term, total_terms=inst.total_terms, split=True,
+                     id=inst.id, settle_period=settle_period)
 
     # 4. Expenses this month — others' unsettled shares
     exp_settled = {
@@ -268,14 +296,26 @@ def get_summary(
     for exp in month_expenses:
         parts = exp.participants or []
         non_me = [p for p in parts if p != ME_ID]
-        if not non_me:
-            continue
         label = exp.name or exp.note or exp.category
+        split = len(parts) > 1
+
+        # If someone else fronted it (paid_by) or I owe someone for it
+        # (payable_to), I owe that person the FULL amount until it's repaid
+        # (is_paid). Participants' shares are collected by me separately.
+        creditor = exp.payable_to or (exp.paid_by if exp.paid_by not in (None, ME_ID) else None)
+        if creditor and not exp.is_paid:
+            _add(creditor, "i_owe", "expense", label, exp.amount, exp.period, split=split, id=exp.id)
+
+        # Other participants owe me their share until they settle it —
+        # even when someone else fronted, since I repay the full amount.
+        # A non-split expense marked paid has no settlement rows, so is_paid
+        # (with no outstanding creditor) also clears participants' debts.
+        participants_cleared = exp.is_paid and not creditor
         for pid in non_me:
-            if (exp.id, pid) in exp_settled:
+            if participants_cleared or (exp.id, pid) in exp_settled:
                 continue
             share = _participant_share(exp.amount, parts, exp.participant_amounts, pid)
-            _add(pid, "owed_to_me", "expense", label, share, exp.period, split=True)
+            _add(pid, "owed_to_me", "expense", label, share, exp.period, split=split, id=exp.id)
 
     people_balances = []
     for pid, b in bal.items():
@@ -313,6 +353,121 @@ def get_summary(
         "loans_nearing_completion": loans_nearing,
         "people_balances": people_balances,
     }
+
+
+class SettleItem(BaseModel):
+    type: str                     # expense | bill | installment | loan
+    id: int
+    direction: str                # owed_to_me | i_owe
+    person_id: int
+    settle_period: Optional[int] = None
+    amount: Optional[float] = None  # loans only: partial payment
+
+
+class SettleRequest(BaseModel):
+    month: int
+    year: int
+    items: list[SettleItem]
+
+
+@router.post("/settle")
+def settle_up(
+    req: SettleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Record a settle-up: clears the selected balance sources for one person.
+
+    owed_to_me shares become settlement rows; a fronted expense I owe flips
+    is_paid; a bill I owe its payee gets a BillPayment; loans get a payment
+    (partial allowed) and auto-settle when fully repaid.
+    """
+    settled = 0
+    for item in req.items:
+        if item.type == "expense":
+            exp = db.query(Expense).filter(
+                Expense.id == item.id, Expense.user_id == current_user.id).first()
+            if not exp:
+                continue
+            if item.direction == "i_owe":
+                exp.is_paid = True
+            else:
+                exists = db.query(ExpenseParticipantSettlement).filter(
+                    ExpenseParticipantSettlement.expense_id == exp.id,
+                    ExpenseParticipantSettlement.person_id == item.person_id,
+                    ExpenseParticipantSettlement.month == req.month,
+                    ExpenseParticipantSettlement.year == req.year,
+                    ExpenseParticipantSettlement.period.is_(None),
+                ).first()
+                if not exists:
+                    db.add(ExpenseParticipantSettlement(
+                        expense_id=exp.id, person_id=item.person_id,
+                        month=req.month, year=req.year, period=None))
+            settled += 1
+
+        elif item.type == "bill":
+            bill = db.query(Bill).filter(
+                Bill.id == item.id, Bill.user_id == current_user.id).first()
+            if not bill:
+                continue
+            if item.direction == "i_owe":
+                q = db.query(BillPayment).filter(
+                    BillPayment.bill_id == bill.id,
+                    BillPayment.month == req.month, BillPayment.year == req.year)
+                q = q.filter(BillPayment.period == item.settle_period) if item.settle_period is not None \
+                    else q.filter(BillPayment.period.is_(None))
+                if not q.first():
+                    db.add(BillPayment(bill_id=bill.id, month=req.month, year=req.year,
+                                       period=item.settle_period, amount_paid=bill.amount))
+            else:
+                q = db.query(BillParticipantSettlement).filter(
+                    BillParticipantSettlement.bill_id == bill.id,
+                    BillParticipantSettlement.person_id == item.person_id,
+                    BillParticipantSettlement.month == req.month,
+                    BillParticipantSettlement.year == req.year)
+                q = q.filter(BillParticipantSettlement.period == item.settle_period) if item.settle_period is not None \
+                    else q.filter(BillParticipantSettlement.period.is_(None))
+                if not q.first():
+                    db.add(BillParticipantSettlement(
+                        bill_id=bill.id, person_id=item.person_id,
+                        month=req.month, year=req.year, period=item.settle_period))
+            settled += 1
+
+        elif item.type == "installment":
+            inst = db.query(Installment).filter(
+                Installment.id == item.id, Installment.user_id == current_user.id).first()
+            if not inst:
+                continue
+            q = db.query(InstallmentParticipantSettlement).filter(
+                InstallmentParticipantSettlement.installment_id == inst.id,
+                InstallmentParticipantSettlement.person_id == item.person_id,
+                InstallmentParticipantSettlement.month == req.month,
+                InstallmentParticipantSettlement.year == req.year)
+            q = q.filter(InstallmentParticipantSettlement.period == item.settle_period) if item.settle_period is not None \
+                else q.filter(InstallmentParticipantSettlement.period.is_(None))
+            if not q.first():
+                db.add(InstallmentParticipantSettlement(
+                    installment_id=inst.id, person_id=item.person_id,
+                    month=req.month, year=req.year, period=item.settle_period))
+            settled += 1
+
+        elif item.type == "loan":
+            from app.models.loan import LoanPayment
+            loan = db.query(Loan).filter(
+                Loan.id == item.id, Loan.user_id == current_user.id).first()
+            if not loan:
+                continue
+            paid = sum(float(p.amount) for p in loan.payments)
+            remaining = float(loan.principal) - paid
+            amt = min(item.amount if item.amount is not None else remaining, remaining)
+            if amt > 0:
+                db.add(LoanPayment(loan_id=loan.id, amount=amt, note="Settle-up"))
+                if paid + amt >= float(loan.principal) - 0.005:
+                    loan.status = "settled"
+                settled += 1
+
+    db.commit()
+    return {"ok": True, "settled": settled}
 
 
 @router.get("/trends")

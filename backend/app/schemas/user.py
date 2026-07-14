@@ -22,6 +22,7 @@ class UserUpdate(BaseModel):
 class UserSettingsOut(BaseModel):
     id: int
     user_id: int
+    category_budgets: Optional[dict] = None
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_enabled: bool
@@ -52,6 +53,7 @@ class UserSettingsOut(BaseModel):
 
 
 class UserSettingsUpdate(BaseModel):
+    category_budgets: Optional[dict] = None
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
     telegram_enabled: Optional[bool] = None

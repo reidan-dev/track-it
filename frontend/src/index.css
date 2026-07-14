@@ -4,43 +4,46 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Soft off-white canvas with white cards, so surfaces read by depth
+       rather than heavy borders. */
+    --background: 220 25% 97%;
+    --foreground: 224 40% 10%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 224 40% 10%;
     --primary: 221.2 83.2% 53.3%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
+    --secondary: 218 25% 94%;
     --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
+    --muted: 218 25% 94%;
+    --muted-foreground: 220 12% 44%;
+    --accent: 219 30% 92%;
     --accent-foreground: 222.2 47.4% 11.2%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
+    --border: 218 22% 89%;
+    --input: 218 22% 86%;
     --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --radius: 0.75rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    /* Cards sit a step above the background instead of blending into it. */
+    --background: 224 47% 5%;
+    --foreground: 213 31% 93%;
+    --card: 223 41% 8%;
+    --card-foreground: 213 31% 93%;
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --secondary: 220 30% 14%;
+    --secondary-foreground: 213 31% 93%;
+    --muted: 220 30% 14%;
+    --muted-foreground: 216 16% 64%;
+    --accent: 220 28% 17%;
+    --accent-foreground: 213 31% 93%;
+    --destructive: 0 63% 40%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
+    --border: 220 28% 15%;
+    --input: 220 28% 18%;
     --ring: 224.3 76.3% 48%;
   }
 }
@@ -169,8 +172,11 @@
        changing the scroll container and breaking the sticky month navigator). */
     overscroll-behavior-x: none;
   }
+  h1, h2, h3 {
+    @apply tracking-tight;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     width: 100%;
     max-width: 100vw;

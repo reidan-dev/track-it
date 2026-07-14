@@ -31,6 +31,33 @@ def list_expenses(
     return q.order_by(Expense.date.desc()).all()
 
 
+@router.get("/search", response_model=list[ExpenseOut])
+def search_expenses(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    person_id: Optional[int] = None,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-month search: text over name/note, plus category/person filters."""
+    query = db.query(Expense).filter(Expense.user_id == current_user.id)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.filter(Expense.name.ilike(like) | Expense.note.ilike(like))
+    if category:
+        query = query.filter(Expense.category == category)
+    rows = query.order_by(Expense.date.desc()).limit(min(max(limit, 1), 500)).all()
+    if person_id is not None:
+        # participants is a JSON list; containment is dialect-specific, so
+        # filter in Python — personal-scale data keeps this cheap.
+        rows = [
+            e for e in rows
+            if person_id in (e.participants or []) or e.paid_by == person_id or e.payable_to == person_id
+        ]
+    return rows
+
+
 @router.post("", response_model=ExpenseOut, status_code=201)
 def create_expense(
     data: ExpenseCreate,

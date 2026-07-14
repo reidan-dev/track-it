@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Modal } from '@/components/shared/Modal'
 import { Button } from '@/components/shared/Button'
 import { Input, Label, Select } from '@/components/shared/Input'
 import { PaymentMethodSelect } from '@/components/shared/PaymentMethodSelect'
 import { ReceiptCapture } from '@/components/shared/ReceiptCapture'
+import { PersonSelect } from '@/components/shared/PersonSelect'
 import { createExpense } from '@/api/expenses'
 import { createIncome } from '@/api/income'
+import { getPeople } from '@/api/people'
 import { ME_ID } from '@/components/shared/ParticipantsEditor'
 import { EXPENSE_CATEGORIES, INCOME_TYPES, getBillingPeriod, CURRENCY_SYMBOLS } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -31,10 +33,15 @@ export function QuickAddSheet({ open, onClose, defaultType = 'expense' }) {
   const [paymentMethod, setPaymentMethod] = useState('')
   const [date, setDate] = useState(today())
   const [receipt, setReceipt] = useState(null)
+  const [paidBy, setPaidBy] = useState(null)        // null = I paid
+  const [splitWith, setSplitWith] = useState([])     // person ids sharing (besides me)
+
+  const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
 
   const reset = () => {
     setType(defaultType); setAmount(''); setName(''); setCategory('Food')
     setIncomeType('Salary'); setPaymentMethod(''); setDate(today()); setReceipt(null)
+    setPaidBy(null); setSplitWith([])
   }
 
   // Fresh state + focus amount each time it opens.
@@ -71,8 +78,13 @@ export function QuickAddSheet({ open, onClose, defaultType = 'expense' }) {
       month: d.getMonth() + 1,
       year: d.getFullYear(),
     }
+    const fronted = paidBy && paidBy !== ME_ID ? paidBy : null
     const payload = type === 'expense'
-      ? { ...base, name, category, note: '', payment_method: paymentMethod, participants: [ME_ID], participant_amounts: {}, receipt_image: receipt }
+      ? {
+          ...base, name, category, note: '', payment_method: paymentMethod,
+          participants: [ME_ID, ...splitWith], participant_amounts: {},
+          receipt_image: receipt, paid_by: fronted, payable_to: fronted,
+        }
       : { ...base, source: name || incomeType, type: incomeType }
     mutation.mutate(payload)
   }
@@ -153,6 +165,51 @@ export function QuickAddSheet({ open, onClose, defaultType = 'expense' }) {
                 ))}
               </div>
             </div>
+            {people.length > 0 && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Who paid?</Label>
+                  <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-muted">
+                    {[{ key: 'me', label: 'I paid' }, { key: 'other', label: 'Someone else' }].map(opt => {
+                      const active = (opt.key === 'me') === !paidBy
+                      return (
+                        <button key={opt.key} type="button"
+                          onClick={() => setPaidBy(opt.key === 'me' ? null : (paidBy || people[0]?.id || null))}
+                          className={cn('h-9 rounded-md text-sm font-medium transition-colors',
+                            active ? 'bg-card shadow-sm text-foreground' : 'text-muted-foreground')}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {paidBy && (
+                    <PersonSelect value={paidBy} onChange={v => setPaidBy(v)} people={people} />
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Split with <span className="text-muted-foreground text-xs">(even split — use Expenses for custom)</span></Label>
+                  <div className="flex flex-wrap gap-2">
+                    {people.map(p => {
+                      const on = splitWith.includes(p.id)
+                      return (
+                        <button key={p.id} type="button"
+                          onClick={() => setSplitWith(s => on ? s.filter(x => x !== p.id) : [...s, p.id])}
+                          className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors',
+                            on ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40')}
+                        >
+                          <span className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[9px] font-semibold"
+                            style={{ backgroundColor: p.color || '#64748b' }}>
+                            {p.emoji || (p.nickname || p.name).charAt(0).toUpperCase()}
+                          </span>
+                          {p.nickname || p.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
             <div className="space-y-1.5">
               <Label>Payment method</Label>
               <PaymentMethodSelect value={paymentMethod} onChange={setPaymentMethod} />

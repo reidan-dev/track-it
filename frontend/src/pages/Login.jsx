@@ -27,9 +27,13 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center bg-background relative overflow-hidden px-4">
+      {/* soft accent glow behind the card */}
+      <div aria-hidden className="absolute w-[480px] h-[480px] rounded-full opacity-20 blur-3xl pointer-events-none"
+        style={{ background: 'radial-gradient(circle, hsl(var(--primary)) 0%, transparent 65%)' }} />
+      <div className="w-full max-w-sm relative">
         <div className="text-center mb-8">
+          <img src="/favicon.svg" alt="" className="w-14 h-14 mx-auto mb-3 rounded-2xl shadow-lg shadow-primary/25" />
           <h1 className="text-3xl font-bold text-primary">track.it</h1>
           <p className="text-muted-foreground mt-1 text-sm">Personal Finance Tracker</p>
         </div>

@@ -1,6 +1,7 @@
 import api from './client'
 
 export const getExpenses = (params) => api.get('/expenses', { params })
+export const searchExpenses = (params) => api.get('/expenses/search', { params })
 export const createExpense = (data) => api.post('/expenses', data)
 export const updateExpense = (id, data) => api.put(`/expenses/${id}`, data)
 export const deleteExpense = (id) => api.delete(`/expenses/${id}`)

@@ -30,6 +30,8 @@ HELP_TEXT = (
     "🦊 track.it bot\n\n"
     "Tap the menu buttons, or use:\n"
     "• ➕ Expense — log spending (or just type `200 lunch gcash`)\n"
+    "   add `split Jay, Ben` to share it, `by Jay` if they fronted it,\n"
+    "   and `#food` to set the category — e.g. `900 dinner by Jay split Jay Ben`\n"
     "• ➕ Income — log income (or `+50000 salary`)\n"
     "• 📅 Due — what's due, tap ✓ to mark paid\n"
     "• 💰 Balances — who owes who\n"
@@ -239,6 +241,7 @@ def _ask_expense_pm(db, user, token, chat_id):
 
 def finalize_expense(db, settings, user, token, chat_id, data):
     today, month, year, period = _period_ctx(settings)
+    fronted = data.get("paid_by")  # person id who fronted it (I owe them the full amount)
     expense = Expense(
         user_id=user.id,
         name=data.get("name"),
@@ -249,7 +252,9 @@ def finalize_expense(db, settings, user, token, chat_id, data):
         period=period,
         month=month,
         year=year,
-        participants=[0],
+        participants=data.get("participants") or [0],
+        paid_by=fronted,
+        payable_to=fronted,
         receipt_image=data.get("receipt"),
     )
     db.add(expense)
@@ -263,8 +268,13 @@ def finalize_expense(db, settings, user, token, chat_id, data):
         bits.append(f"via {expense.payment_method}")
     if data.get("receipt"):
         bits.append("📎")
-    line = " ".join(bits)
-    _send_menu(token, chat_id, f"{line}\nThis month: {views.fmt(user, total)}")
+    lines = [" ".join(bits)]
+    if data.get("split_names"):
+        lines.append(f"👥 Split with {', '.join(data['split_names'])}")
+    if data.get("fronted_name"):
+        lines.append(f"💸 {data['fronted_name']} fronted it — you owe {views.fmt(user, expense.amount)}")
+    lines.append(f"This month: {views.fmt(user, total)}")
+    _send_menu(token, chat_id, "\n".join(lines))
 
 
 # ── F5 — add income ──────────────────────────────────────────────────────────
@@ -578,6 +588,11 @@ def handle_photo(db, settings, user, token, chat_id, message):
 # ── free-text accelerators ───────────────────────────────────────────────────
 
 _LOAN_RE = re.compile(r"^(lent|lend|borrowed|borrow)\s+(.+?)\s+(?:to|from)\s+(.+)$", re.I)
+# Expense accelerator extras. `by` must come before `split` in the stop-lookahead
+# of each so they can appear in either order.
+_BY_RE = re.compile(r"\bby\s+([^\s,][^,]*?)(?=\s+split\b|\s+#|\s*$)", re.I)
+_SPLIT_RE = re.compile(r"\bsplit(?:\s+with)?\s+(.+?)(?=\s+by\b|\s+#|\s*$)", re.I)
+_CAT_RE = re.compile(r"#(\w+)")
 
 
 def try_accelerators(db, settings, user, token, chat_id, text):
@@ -602,11 +617,45 @@ def try_accelerators(db, settings, user, token, chat_id, text):
                             {"amount": amt, "source": rest or "Income", "type": "Other"})
             return True
 
-    # Expense: "200 lunch gcash" (leading number)
+    # Expense: "200 lunch gcash" (leading number). Optional extras anywhere
+    # after the name: "#food" category, "by Jay" (they fronted it),
+    # "split Jay, Ben" (share the cost).
     if re.match(r"^\d", text):
         amt = _parse_amount(text)
         if amt and amt > 0:
             rest = re.sub(r"^[\d,]*\.?\d*\s*", "", text).strip()
+
+            category = None
+            m_cat = _CAT_RE.search(rest)
+            if m_cat:
+                category = m_cat.group(1).capitalize()
+                rest = _CAT_RE.sub("", rest).strip()
+
+            split_names, participants = [], None
+            m_split = _SPLIT_RE.search(rest)
+            if m_split:
+                raw = re.split(r"\s*(?:,|&|\band\b)\s*|\s+", m_split.group(1).strip())
+                rest = (rest[: m_split.start()] + " " + rest[m_split.end():]).strip()
+                participants = [0]
+                for nm in raw:
+                    if not nm:
+                        continue
+                    p = _find_or_create_person(db, user, nm)
+                    if p.id not in participants:
+                        participants.append(p.id)
+                        split_names.append(p.nickname or p.name)
+
+            paid_by, fronted_name = None, None
+            m_by = _BY_RE.search(rest)
+            if m_by:
+                p = _find_or_create_person(db, user, m_by.group(1).strip())
+                paid_by, fronted_name = p.id, (p.nickname or p.name)
+                rest = (rest[: m_by.start()] + " " + rest[m_by.end():]).strip()
+                # The fronter shares the cost too when a split is given.
+                if participants is not None and p.id not in participants:
+                    participants.append(p.id)
+                    split_names.append(fronted_name)
+
             pm = None
             methods = _payment_methods(db, user)
             if rest and methods:
@@ -616,8 +665,12 @@ def try_accelerators(db, settings, user, token, chat_id, text):
                         pm = mth.name
                         rest = rest[: -len(rest.split()[-1])].strip()
                         break
-            finalize_expense(db, settings, user, token, chat_id,
-                             {"amount": amt, "name": rest or None, "payment_method": pm})
+            finalize_expense(db, settings, user, token, chat_id, {
+                "amount": amt, "name": rest or None, "payment_method": pm,
+                "category": category, "participants": participants,
+                "paid_by": paid_by, "fronted_name": fronted_name,
+                "split_names": split_names,
+            })
             return True
 
     return False

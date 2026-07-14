@@ -31,13 +31,19 @@ function Tab({ to, icon: Icon, label }) {
       to={to}
       className={({ isActive }) =>
         cn(
-          'flex flex-col items-center justify-center gap-0.5 flex-1 h-full min-w-0 transition-colors',
+          'flex flex-col items-center justify-center gap-1 flex-1 h-full min-w-0 transition-colors',
           isActive ? 'text-primary' : 'text-muted-foreground'
         )
       }
     >
-      <Icon className="w-5 h-5 shrink-0" />
-      <span className="text-[10px] font-medium leading-none">{label}</span>
+      {({ isActive }) => (
+        <>
+          <span className={cn('flex items-center justify-center rounded-full px-4 py-0.5 transition-colors', isActive && 'bg-primary/10')}>
+            <Icon className="w-5 h-5 shrink-0" />
+          </span>
+          <span className="text-[10px] font-medium leading-none">{label}</span>
+        </>
+      )}
     </NavLink>
   )
 }
@@ -56,8 +62,8 @@ export function BottomNav() {
 
   return (
     <>
-      {/* Fixed bottom tab bar — mobile only */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-card/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+      {/* Floating pill tab bar — mobile only */}
+      <nav className="md:hidden fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] inset-x-3 z-40 rounded-2xl border border-border/60 bg-card/90 backdrop-blur-xl shadow-lg shadow-black/10 dark:shadow-black/40">
         <div className="relative flex items-stretch h-16">
           <Tab {...tabs[0]} />
           <Tab {...tabs[1]} />

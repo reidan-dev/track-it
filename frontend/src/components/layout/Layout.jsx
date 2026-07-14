@@ -19,8 +19,8 @@ export default function Layout({ children }) {
             <MonthNavigator />
           </div>
         )}
-        {/* Bottom padding on mobile clears the fixed bottom nav + safe area */}
-        <div className="p-4 sm:p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-6">{children}</div>
+        {/* Bottom padding on mobile clears the floating bottom nav + safe area */}
+        <div className="p-4 sm:p-6 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-6">{children}</div>
       </main>
       <BottomNav />
     </div>

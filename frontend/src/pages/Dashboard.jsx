@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { getDashboardSummary, getDashboardTrends } from '@/api/dashboard'
+import { getSettings } from '@/api/settings'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Card'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -51,6 +52,7 @@ export default function Dashboard() {
     queryKey: ['dashboard-trends', 6],
     queryFn: () => getDashboardTrends(6).then(r => r.data),
   })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => getSettings().then(r => r.data) })
 
   if (loadingSummary || loadingTrends) return <LoadingState text="Loading dashboard…" />
 
@@ -62,6 +64,14 @@ export default function Dashboard() {
     { name: 'Paid', value: billsPaid, fill: '#10b981' },
     { name: 'Unpaid', value: billsUnpaid, fill: '#ef4444' },
   ].filter(d => d.value > 0)
+
+  // Budget progress: categories with a cap set, spent from this month's totals.
+  const budgets = settings?.category_budgets || {}
+  const spentByCat = Object.fromEntries(categories.map(c => [c.category, c.total]))
+  const budgetRows = Object.entries(budgets)
+    .filter(([, cap]) => cap > 0)
+    .map(([cat, cap]) => ({ cat, cap, spent: spentByCat[cat] || 0, pct: Math.min(100, ((spentByCat[cat] || 0) / cap) * 100) }))
+    .sort((a, b) => b.pct - a.pct)
 
   // Net balance per person (collapse owed/owe to a single net)
   const balances = (summary?.people_balances || [])
@@ -159,6 +169,37 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Budgets */}
+      {budgetRows.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm">Budgets · this month</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {budgetRows.map(({ cat, cap, spent, pct }) => {
+              const over = spent > cap
+              const warn = !over && pct >= 80
+              return (
+                <div key={cat}>
+                  <div className="flex items-center justify-between text-sm mb-1">
+                    <span className="font-medium">{cat}</span>
+                    <span className={cn('tabular-nums text-xs', over ? 'text-red-500 font-semibold' : 'text-muted-foreground')}>
+                      {formatCurrency(spent)} / {formatCurrency(cap)}
+                      {over && ` · ${formatCurrency(spent - cap)} over`}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={cn('h-full rounded-full transition-all',
+                        over ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-primary')}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Top balances */}
       {balances.length > 0 && (

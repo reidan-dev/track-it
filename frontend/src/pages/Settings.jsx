@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/shared/Ca
 import { Button } from '@/components/shared/Button'
 import { Input, Label, Select } from '@/components/shared/Input'
 import { Badge } from '@/components/shared/Badge'
-import { cn } from '@/lib/utils'
+import { cn, EXPENSE_CATEGORIES } from '@/lib/utils'
 import { BASE_THEMES, SKINS, ACCENT_SWATCHES, applyTheme, applyAccent, resolveAccent } from '@/lib/theme'
 import { AVATAR_STYLES, useAvatarStyle, setAvatarStyle } from '@/lib/avatarStyle'
 import { PersonAvatars } from '@/components/shared/PersonAvatars'
@@ -100,6 +100,7 @@ export default function Settings() {
         digest_frequency: settings.digest_frequency || 'daily',
         digest_time: settings.digest_time || '08:00',
         digest_weekday: settings.digest_weekday ?? 0,
+        category_budgets: settings.category_budgets || {},
       })
     }
   }, [settings])
@@ -350,6 +351,40 @@ export default function Settings() {
             {saveMutation.isPending ? 'Saving…' : 'Save Preferences'}
           </Button>
           {saveMutation.isSuccess && <Badge variant="success">Saved!</Badge>}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-sm">Monthly Budgets</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Cap what you plan to spend per category each month. Progress shows on the Dashboard; leave blank for no cap.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+            {EXPENSE_CATEGORIES.map(cat => (
+              <div key={cat} className="flex items-center justify-between gap-3">
+                <span className="text-sm">{cat}</span>
+                <Input
+                  type="number" inputMode="decimal" min="0" step="1"
+                  className="w-32 text-right"
+                  placeholder="—"
+                  value={form.category_budgets?.[cat] ?? ''}
+                  onChange={e => {
+                    const v = e.target.value
+                    setForm(f => {
+                      const next = { ...(f.category_budgets || {}) }
+                      if (v === '' || parseFloat(v) <= 0) delete next[cat]
+                      else next[cat] = parseFloat(v)
+                      return { ...f, category_budgets: next }
+                    })
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <Button onClick={() => saveMutation.mutate({ category_budgets: form.category_budgets || {} })} disabled={saveMutation.isPending}>
+            {saveMutation.isPending ? 'Saving…' : 'Save Budgets'}
+          </Button>
         </CardContent>
       </Card>
 
