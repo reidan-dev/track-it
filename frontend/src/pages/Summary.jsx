@@ -9,7 +9,7 @@ import { Badge } from '@/components/shared/Badge'
 import { Button } from '@/components/shared/Button'
 import { Modal } from '@/components/shared/Modal'
 import { formatCurrency } from '@/lib/utils'
-import { TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronUp, ImageDown, Download, HandCoins } from 'lucide-react'
+import { TrendingUp, TrendingDown, Wallet, AlertCircle, ChevronDown, ChevronUp, ImageDown, Download, HandCoins, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PullToRefresh } from '@/components/shared/PullToRefresh'
 import { useMonthSwipe } from '@/hooks/useMonthSwipe'
@@ -336,6 +336,20 @@ export default function Summary() {
   const balances = buildBalances(period)
   const net_balance = balances.reduce((s, p) => s + p.net, 0)
 
+  // Reimbursements I'm waiting on: shares of items I've already paid for,
+  // grouped by item (Balances shows the same money grouped by person).
+  const awaitingMap = new Map()
+  balances.forEach(p => (p.sources || []).forEach(s => {
+    if (s.direction !== 'owed_to_me' || !s.awaiting || s.type === 'loan') return
+    const key = `${s.type}-${s.id}-${s.period ?? ''}`
+    const it = awaitingMap.get(key) || { type: s.type, label: s.label, total: 0, people: [] }
+    it.total += s.amount
+    it.people.push({ name: p.nickname || p.name, amount: s.amount })
+    awaitingMap.set(key, it)
+  }))
+  const awaitingItems = [...awaitingMap.values()].sort((a, b) => b.total - a.total)
+  const awaitingTotal = awaitingItems.reduce((s, it) => s + it.total, 0)
+
   // Image picker works off its own period selection.
   const imageBalances = buildBalances(imagePeriod)
 
@@ -472,6 +486,42 @@ export default function Summary() {
           </Card>
         </div>
       )}
+
+      {/* Reimbursements I've fronted and am waiting on */}
+      {awaitingItems.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-amber-500" />
+                Awaiting reimbursement
+              </CardTitle>
+              <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                {formatCurrency(awaitingTotal)}
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {awaitingItems.map((it, i) => (
+              <div key={i} className="flex items-start justify-between gap-3 text-sm">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[it.type] || it.type}</Badge>
+                    <span className="truncate">{it.label}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    from {it.people.map(p => `${p.name} ${formatCurrency(p.amount)}`).join(' · ')}
+                  </p>
+                </div>
+                <span className="font-medium tabular-nums shrink-0 text-amber-600 dark:text-amber-400">
+                  {formatCurrency(it.total)}
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Upcoming payments */}

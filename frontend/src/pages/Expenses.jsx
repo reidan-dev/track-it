@@ -20,6 +20,8 @@ import { PullToRefresh } from '@/components/shared/PullToRefresh'
 import { SkeletonList } from '@/components/shared/Loading'
 import { PersonAvatars } from '@/components/shared/PersonAvatars'
 import { involvedPeople } from '@/lib/involved'
+import { ownershipOf, awaitingAmount } from '@/lib/ownership'
+import { OwnershipStripe, OwnerChip, AwaitingChip, TriCheck } from '@/components/shared/OwnershipBadges'
 import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
 import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock, CheckCircle, Circle, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -232,10 +234,35 @@ export default function Expenses() {
                   const parts = e.participants || []
                   const hasSplit = parts.length > 1
                   const creditor = creditorOf(e)
-                  // With a creditor, the check toggle means "I repaid them" and
-                  // is always manual; otherwise splits auto-track settlements.
-                  const manualToggle = !hasSplit || !!creditor
                   const involved = involvedFor(e)
+                  const own = ownershipOf(e, people)
+                  const others = parts.filter(p => p !== ME_ID)
+                  const unsettledIds = others.filter(pid => !settledPersonIds(e, e.month, e.year).has(pid))
+                  // Tri-state check. Creditor expenses stay binary (green =
+                  // repaid them). Split expenses I paid for skip "empty" —
+                  // the purchase already happened — so they cycle yellow ↔ green.
+                  let checkState, cycleCheck
+                  if (creditor || others.length === 0) {
+                    checkState = e.is_paid ? 'green' : 'empty'
+                    cycleCheck = () => paidMutation.mutate({ id: e.id, is_paid: !e.is_paid })
+                  } else if (unsettledIds.length) {
+                    checkState = 'yellow'
+                    cycleCheck = () => {
+                      unsettledIds.forEach(pid => settleMutation.mutate({ id: e.id, personId: pid, period: null, settled: false, m: e.month, y: e.year }))
+                      if (!e.is_paid) paidMutation.mutate({ id: e.id, is_paid: true })
+                    }
+                  } else {
+                    checkState = 'green'
+                    cycleCheck = () => {
+                      others.forEach(pid => settleMutation.mutate({ id: e.id, personId: pid, period: null, settled: true, m: e.month, y: e.year }))
+                      if (e.is_paid) paidMutation.mutate({ id: e.id, is_paid: false })
+                    }
+                  }
+                  // The purchase is the advance: shares are "awaiting" unless
+                  // someone else fronted it and I haven't repaid them yet.
+                  const awaiting = own?.tier === 'owner' || (creditor && !e.is_paid)
+                    ? 0
+                    : awaitingAmount(e, e.amount, e.month, e.year, [null])
                   const settledIds = [...settledPersonIds(e, e.month, e.year)]
                   const avatarProps = {
                     ids: involved.ids, people, roles: involved.roles, title: 'Involved',
@@ -247,29 +274,33 @@ export default function Expenses() {
                         { icon: Pencil, label: 'Edit', onClick: () => openEdit(e), className: 'bg-blue-500' },
                         { icon: Trash2, label: 'Delete', onClick: () => delMutation.mutate(e.id), className: 'bg-destructive' },
                       ]}>
-                        <div className="py-2.5 text-sm">
+                        <div className="relative py-2.5 pl-2.5 text-sm">
+                          <OwnershipStripe ownership={own} />
                           <div className="flex items-center justify-between gap-2">
-                            <button
-                              onClick={manualToggle ? () => paidMutation.mutate({ id: e.id, is_paid: !e.is_paid }) : undefined}
-                              disabled={!manualToggle}
-                              title={creditor
-                                ? (e.is_paid ? `Repaid ${personName(people, creditor)} — tap to undo` : `Tap once you've repaid ${personName(people, creditor)}`)
-                                : hasSplit
-                                ? (e.is_paid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
-                                : (e.is_paid ? 'Mark unpaid' : 'Mark paid')}
-                              className={cn('shrink-0 transition-colors', e.is_paid ? 'text-green-500' : 'text-muted-foreground', manualToggle && (e.is_paid ? 'hover:text-red-400' : 'hover:text-primary'), !manualToggle && 'cursor-default')}
-                            >
-                              {e.is_paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-                            </button>
+                            <TriCheck
+                              className="shrink-0"
+                              state={checkState}
+                              hasOthers={others.length > 0}
+                              onCycle={cycleCheck}
+                              titles={creditor ? {
+                                empty: `Tap once you've repaid ${personName(people, creditor)}`,
+                                green: `Repaid ${personName(people, creditor)} — tap to undo`,
+                              } : others.length ? {
+                                yellow: 'You paid — awaiting their shares · tap once everyone paid you back',
+                                green: 'Everyone paid you back — tap to undo',
+                              } : {}}
+                            />
                             <div className="min-w-0 flex-1">
-                              {e.name && <p className="font-medium text-sm flex items-center gap-1.5 min-w-0"><span className={cn('truncate', e.is_paid && 'text-muted-foreground line-through')}>{e.name}</span>{involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}</p>}
+                              {e.name && <p className="font-medium text-sm flex items-center gap-1.5 min-w-0"><span className={cn('truncate', e.is_paid && 'text-muted-foreground line-through')}>{e.name}</span><OwnerChip ownership={own} />{involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}</p>}
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Badge variant="muted">{e.category}</Badge>
                                 <span className="text-xs text-muted-foreground">{e.date}</span>
                                 {!e.name && involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
                                 {hasSplit && <Users className="w-3 h-3 text-muted-foreground" />}
+                                {!e.name && <OwnerChip ownership={own} />}
                                 {e.has_receipt && <Paperclip className="w-3 h-3 text-muted-foreground" />}
                                 {e.payment_method && <PaymentMethodBadge value={e.payment_method} />}
+                                <AwaitingChip amount={awaiting} />
                               </div>
                               {creditor && (
                                 <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-xs">

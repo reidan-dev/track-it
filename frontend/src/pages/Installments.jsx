@@ -20,7 +20,9 @@ import { usePeriod } from '@/contexts/PeriodContext'
 import { SkeletonList } from '@/components/shared/Loading'
 import { PersonAvatars } from '@/components/shared/PersonAvatars'
 import { involvedPeople } from '@/lib/involved'
-import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
+import { ownershipOf, awaitingAmount } from '@/lib/ownership'
+import { OwnershipStripe, OwnerChip, AwaitingChip, TriCheck } from '@/components/shared/OwnershipBadges'
+import { settledPersonIds } from '@/lib/settlement'
 
 const now = new Date()
 
@@ -96,17 +98,38 @@ export default function Installments() {
 
   const sortPaidLast = (arr) => [...arr].sort((a, b) => Number(isFullyPaidThisMonth(a)) - Number(isFullyPaidThisMonth(b)))
 
-  // Toggle a participant's share on a monthly installment; auto-pay/unpay this
-  // month's term once everyone has (or no longer has) settled. Biweekly and
-  // completed installments keep manual control.
+  // Tri-state pay check (see Bills): empty → green → yellow → empty.
+  const othersOf = (inst) => (inst.participants || []).filter(p => p !== ME_ID)
+  const unsettledOthers = (inst, period) => {
+    const done = settledPersonIds(inst, M, Y, period)
+    return othersOf(inst).filter(pid => !done.has(pid))
+  }
+  const instState = (inst, paidFlag, period) =>
+    !paidFlag ? 'empty' : (unsettledOthers(inst, period).length ? 'yellow' : 'green')
+  const cycleInst = (inst, paidFlag, period) => {
+    const state = instState(inst, paidFlag, period)
+    if (state === 'empty') {
+      payMutation.mutate({ id: inst.id, period })
+      unsettledOthers(inst, period).forEach(pid =>
+        settleMutation.mutate({ id: inst.id, personId: pid, period, settled: false }))
+    } else if (state === 'green') {
+      if (othersOf(inst).length) {
+        const done = settledPersonIds(inst, M, Y, period)
+        othersOf(inst).filter(pid => done.has(pid)).forEach(pid =>
+          settleMutation.mutate({ id: inst.id, personId: pid, period, settled: true }))
+      } else {
+        unpayMutation.mutate({ id: inst.id, period })
+      }
+    } else {
+      unpayMutation.mutate({ id: inst.id, period })
+    }
+  }
+
+  // Paying a term and collecting shares are independent (advance-payment
+  // model): settling a share never flips the term's paid state.
   const toggleShareInst = (inst, personId) => {
     const wasSettled = settledPersonIds(inst, M, Y, null).has(personId)
     settleMutation.mutate({ id: inst.id, personId, period: null, settled: wasSettled })
-    if (!isSplit(inst) || inst.frequency === 'biweekly' || inst.status === 'completed') return
-    const allPaid = allSettledAfterToggle(inst, M, Y, null, personId, !wasSettled)
-    const paidNow = isPaidMonthly(inst)
-    if (allPaid && !paidNow) payMutation.mutate({ id: inst.id })
-    else if (!allPaid && paidNow) unpayMutation.mutate({ id: inst.id })
   }
   const periodOf = (inst) => inst.due_day ? getBillingPeriod(parseInt(String(inst.due_day).split(',')[0].trim())) : 1
   const activeList = installments.filter(i => i.status === 'active')
@@ -236,16 +259,21 @@ export default function Installments() {
     const parts = inst.participants || []
     const hasSplit = parts.length > 1
     const involved = involvedPeople(inst)
-    const lockPaid = hasSplit && !biweekly && !completed  // monthly split installments auto-pay from settlements
+    const own = ownershipOf(inst, people)
+    const paidPeriods = biweekly
+      ? [1, 2].filter(per => isPaidPeriod(inst, per))
+      : (fullyPaid ? [null] : [])
+    const awaiting = own?.tier === 'owner' || completed ? 0 : awaitingAmount(inst, inst.installment_amount, M, Y, paidPeriods)
     const avatarProps = {
       ids: involved.ids, people, roles: involved.roles, title: 'Involved',
-      ...(lockPaid ? { settleableIds: parts, settledIds: [...settledPersonIds(inst, M, Y, null)], onToggleSettled: (pid) => toggleShareInst(inst, pid) } : {}),
+      ...(hasSplit && !biweekly && !completed ? { settleableIds: parts, settledIds: [...settledPersonIds(inst, M, Y, null)], onToggleSettled: (pid) => toggleShareInst(inst, pid) } : {}),
     }
     const statusLabel = completed ? 'Done' : fullyPaid ? 'Paid' : biweekly ? `${[1,2].filter(p=>isPaidPeriod(inst,p)).length}/2 paid` : 'Unpaid'
 
     return (
-      <Card>
-        <div className="px-3 py-2.5">
+      <Card className="relative overflow-hidden">
+        <OwnershipStripe ownership={own} />
+        <div className="px-3 py-2.5 pl-4">
           <div className="flex items-center gap-3">
             {/* Pay toggle(s) */}
             {completed ? (
@@ -255,47 +283,38 @@ export default function Installments() {
                 {[1, 2].map(p => {
                   const pPaid = isPaidPeriod(inst, p)
                   return (
-                    <button key={p}
-                      onClick={() => pPaid
-                        ? unpayMutation.mutate({ id: inst.id, period: p })
-                        : payMutation.mutate({ id: inst.id, period: p })
-                      }
-                      title={pPaid ? `Undo Period ${p}` : `Pay Period ${p}`}
-                      className={cn('flex flex-col items-center gap-0.5 text-[10px] transition-colors',
-                        pPaid ? 'text-green-500 hover:text-red-400' : 'text-muted-foreground hover:text-primary')}>
-                      {pPaid ? <CheckCircle className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-                      {p === 1 ? '1–15' : '16+'}
-                    </button>
+                    <div key={p} className="flex flex-col items-center gap-0.5">
+                      <TriCheck state={instState(inst, pPaid, p)} hasOthers={othersOf(inst).length > 0}
+                        onCycle={() => cycleInst(inst, pPaid, p)} />
+                      <span className="text-[10px] text-muted-foreground">{p === 1 ? '1–15' : '16+'}</span>
+                    </div>
                   )
                 })}
               </div>
             ) : (
-              <button
-                onClick={lockPaid ? undefined : () => fullyPaid
-                  ? unpayMutation.mutate({ id: inst.id })
-                  : payMutation.mutate({ id: inst.id })
-                }
-                disabled={lockPaid}
-                title={lockPaid
-                  ? (fullyPaid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
-                  : (fullyPaid ? 'Mark unpaid' : 'Mark paid')}
-                className={cn('shrink-0 transition-colors', fullyPaid ? 'text-green-500' : 'text-muted-foreground', !lockPaid && (fullyPaid ? 'hover:text-red-400' : 'hover:text-primary'), lockPaid && 'cursor-default')}
-              >
-                {fullyPaid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-              </button>
+              <TriCheck
+                className="shrink-0"
+                state={instState(inst, fullyPaid, null)}
+                hasOthers={othersOf(inst).length > 0}
+                onCycle={() => cycleInst(inst, fullyPaid, null)}
+              />
             )}
 
             {/* Name + progress summary */}
             <button onClick={onToggleOpen} className="flex-1 min-w-0 text-left">
               <div className="flex items-center gap-1.5">
                 <span className="font-medium text-sm truncate">{inst.name}</span>
+                <OwnerChip ownership={own} />
                 {involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
                 {hasSplit && <Users className="w-3 h-3 text-muted-foreground shrink-0" />}
                 {biweekly && <Badge variant="warning" className="text-[10px]">biweekly</Badge>}
               </div>
-              <p className="text-xs text-muted-foreground truncate">
-                {inst.terms_paid}/{inst.total_terms} terms · {formatCurrency(remaining)} left
-              </p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-xs text-muted-foreground truncate">
+                  {inst.terms_paid}/{inst.total_terms} terms · {formatCurrency(remaining)} left
+                </p>
+                <AwaitingChip amount={awaiting} />
+              </div>
             </button>
 
             {/* Per-term amount */}

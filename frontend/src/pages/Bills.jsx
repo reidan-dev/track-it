@@ -19,28 +19,15 @@ import { usePeriod } from '@/contexts/PeriodContext'
 import { SkeletonList } from '@/components/shared/Loading'
 import { PersonAvatars } from '@/components/shared/PersonAvatars'
 import { involvedPeople } from '@/lib/involved'
-import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
+import { ownershipOf, awaitingAmount } from '@/lib/ownership'
+import { OwnershipStripe, OwnerChip, AwaitingChip, TriCheck } from '@/components/shared/OwnershipBadges'
+import { settledPersonIds } from '@/lib/settlement'
 
 const BILL_CATEGORIES = ['Rent', 'Utilities', 'Subscription', 'Insurance', 'Other']
 const EMPTY_FORM = {
   name: '', amount: '', due_day: '1', due_day_2: '16', frequency: 'monthly',
   category: 'Utilities', is_recurring: true, notes: '',
   payment_method: '', payable_to: '', participants: [ME_ID], participant_amounts: {},
-}
-
-function PeriodPayButton({ payments, month, year, period, onPay, onUnpay }) {
-  const paid = payments.some(p => p.period === period && p.month === month && p.year === year)
-  return (
-    <button
-      onClick={() => paid ? onUnpay(period) : onPay(period)}
-      title={paid ? `Undo Period ${period}` : `Pay Period ${period}`}
-      className={cn('flex flex-col items-center gap-0.5 transition-colors',
-        paid ? 'text-green-500 hover:text-red-400' : 'text-muted-foreground hover:text-primary')}
-    >
-      {paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-      <span className="text-[10px]">{period === 1 ? '1–15' : '16+'}</span>
-    </button>
-  )
 }
 
 export default function Bills() {
@@ -117,14 +104,39 @@ export default function Bills() {
 
   // Toggle a participant's share on a monthly bill; auto-pay/unpay the bill once
   // everyone has (or no longer has) settled. Biweekly bills keep manual control.
+  // Tri-state pay check: empty → green (paid & everyone settled) → yellow
+  // (paid by me, shares owed back) → empty. period is null for monthly bills.
+  const othersOf = (bill) => (bill.participants || []).filter(p => p !== ME_ID)
+  const unsettledOthers = (bill, period) => {
+    const done = settledPersonIds(bill, MONTH, YEAR, period)
+    return othersOf(bill).filter(pid => !done.has(pid))
+  }
+  const billState = (bill, paidFlag, period) =>
+    !paidFlag ? 'empty' : (unsettledOthers(bill, period).length ? 'yellow' : 'green')
+  const cycleBill = (bill, paidFlag, period) => {
+    const state = billState(bill, paidFlag, period)
+    if (state === 'empty') {
+      payMutation.mutate({ id: bill.id, period })
+      unsettledOthers(bill, period).forEach(pid =>
+        settleMutation.mutate({ id: bill.id, personId: pid, period, settled: false }))
+    } else if (state === 'green') {
+      if (othersOf(bill).length) {
+        const done = settledPersonIds(bill, MONTH, YEAR, period)
+        othersOf(bill).filter(pid => done.has(pid)).forEach(pid =>
+          settleMutation.mutate({ id: bill.id, personId: pid, period, settled: true }))
+      } else {
+        unpayMutation.mutate({ id: bill.id, period })
+      }
+    } else {
+      unpayMutation.mutate({ id: bill.id, period })
+    }
+  }
+
+  // Paying the bill (to the biller) and collecting shares are independent:
+  // settling a share never flips the bill's paid state.
   const toggleShareBill = (bill, personId) => {
     const wasSettled = settledPersonIds(bill, MONTH, YEAR, null).has(personId)
     settleMutation.mutate({ id: bill.id, personId, period: null, settled: wasSettled })
-    if (!isSplit(bill)) return
-    const allPaid = allSettledAfterToggle(bill, MONTH, YEAR, null, personId, !wasSettled)
-    const paidNow = isPaidMonthly(bill)
-    if (allPaid && !paidNow) payMutation.mutate({ id: bill.id, period: null })
-    else if (!allPaid && paidNow) unpayMutation.mutate({ id: bill.id, period: null })
   }
 
   const openEdit = (e, bill) => {
@@ -186,52 +198,58 @@ export default function Bills() {
     const hasSplit = parts.length > 1
     const payee = bill.payable_to ? people.find(p => p.id === bill.payable_to) : null
     const involved = involvedPeople(bill)
-    const lockPaid = hasSplit && !biweekly  // monthly split bills auto-pay from settlements
+    const own = ownershipOf(bill, people)
+    const paidPeriods = biweekly
+      ? [1, 2].filter(per => (bill.payments || []).some(p => p.period === per && p.month === MONTH && p.year === YEAR))
+      : (paid ? [null] : [])
+    const awaiting = own?.tier === 'owner' ? 0 : awaitingAmount(bill, bill.amount, MONTH, YEAR, paidPeriods)
     const avatarProps = {
       ids: involved.ids, people, roles: involved.roles, title: 'Involved',
-      ...(lockPaid ? { settleableIds: parts, settledIds: [...settledPersonIds(bill, MONTH, YEAR, null)], onToggleSettled: (pid) => toggleShareBill(bill, pid) } : {}),
+      ...(hasSplit && !biweekly ? { settleableIds: parts, settledIds: [...settledPersonIds(bill, MONTH, YEAR, null)], onToggleSettled: (pid) => toggleShareBill(bill, pid) } : {}),
     }
     return (
-      <Card>
-        <div className="flex items-center gap-3 px-3 py-2.5">
+      <Card className="relative overflow-hidden">
+        <OwnershipStripe ownership={own} />
+        <div className="flex items-center gap-3 px-3 py-2.5 pl-4">
           {/* Pay button(s) */}
           {biweekly ? (
             <div className="flex gap-2 shrink-0">
-              <PeriodPayButton payments={bill.payments || []} month={MONTH} year={YEAR} period={1}
-                onPay={p => payMutation.mutate({ id: bill.id, period: p })}
-                onUnpay={p => unpayMutation.mutate({ id: bill.id, period: p })} />
-              <PeriodPayButton payments={bill.payments || []} month={MONTH} year={YEAR} period={2}
-                onPay={p => payMutation.mutate({ id: bill.id, period: p })}
-                onUnpay={p => unpayMutation.mutate({ id: bill.id, period: p })} />
+              {[1, 2].map(per => {
+                const pPaid = (bill.payments || []).some(x => x.period === per && x.month === MONTH && x.year === YEAR)
+                return (
+                  <div key={per} className="flex flex-col items-center gap-0.5">
+                    <TriCheck state={billState(bill, pPaid, per)} hasOthers={othersOf(bill).length > 0}
+                      onCycle={() => cycleBill(bill, pPaid, per)} />
+                    <span className="text-[10px] text-muted-foreground">{per === 1 ? '1–15' : '16+'}</span>
+                  </div>
+                )
+              })}
             </div>
           ) : (
-            <button
-              onClick={lockPaid ? undefined : () => paid
-                ? unpayMutation.mutate({ id: bill.id, period: null })
-                : payMutation.mutate({ id: bill.id, period: null })
-              }
-              disabled={lockPaid}
-              title={lockPaid
-                ? (paid ? 'Paid — everyone settled their share' : 'Auto-marks paid once everyone settles their share')
-                : (paid ? 'Mark unpaid' : 'Mark paid')}
-              className={cn('shrink-0 transition-colors', paid ? 'text-green-500' : 'text-muted-foreground', !lockPaid && (paid ? 'hover:text-red-400' : 'hover:text-primary'), lockPaid && 'cursor-default')}
-            >
-              {paid ? <CheckCircle className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-            </button>
+            <TriCheck
+              className="shrink-0"
+              state={billState(bill, paid, null)}
+              hasOthers={othersOf(bill).length > 0}
+              onCycle={() => cycleBill(bill, paid, null)}
+            />
           )}
 
           {/* Name + meta */}
           <button onClick={onToggleOpen} className="flex-1 min-w-0 text-left">
             <div className="flex items-center gap-1.5">
               <span className={cn('font-medium text-sm truncate', paid && 'text-muted-foreground')}>{bill.name}</span>
+              <OwnerChip ownership={own} />
               {involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
               {hasSplit && <Users className="w-3 h-3 text-muted-foreground shrink-0" />}
             </div>
-            <p className="text-xs text-muted-foreground truncate">
-              {bill.category}
-              {biweekly ? ' · biweekly' : ` · due ${bill.due_day}`}
-              {bill.is_recurring && ' · recurring'}
-            </p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="text-xs text-muted-foreground truncate">
+                {bill.category}
+                {biweekly ? ' · biweekly' : ` · due ${bill.due_day}`}
+                {bill.is_recurring && ' · recurring'}
+              </p>
+              <AwaitingChip amount={awaiting} />
+            </div>
           </button>
 
           {/* Amount */}
