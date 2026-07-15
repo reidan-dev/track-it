@@ -1,15 +1,8 @@
 import { cn, formatCurrency } from '@/lib/utils'
+import { effectiveShares } from '@/lib/deductions'
 import { Check } from 'lucide-react'
 
 const ME_ID = 0
-
-function shareOf(amount, participants, participantAmounts, pid) {
-  if (!amount) return 0
-  const custom = participantAmounts?.[String(pid)]
-  if (custom != null && custom !== '') return parseFloat(custom)
-  const count = participants?.length || 1
-  return parseFloat(amount) / count
-}
 
 function personLabel(pid, people) {
   if (pid === ME_ID) return 'Me'
@@ -34,7 +27,7 @@ function personEmoji(pid, people) {
  * in a split; green when that person has paid their share for the period.
  * Only renders when there's an actual split (more than one participant).
  */
-export function SplitTracker({ entry, amount, people, month, year, onToggle }) {
+export function SplitTracker({ entry, amount, people, month, year, onToggle, deductions = [] }) {
   const participants = entry.participants || []
   if (participants.length <= 1) return null
 
@@ -51,11 +44,14 @@ export function SplitTracker({ entry, amount, people, month, year, onToggle }) {
   return (
     <div className="mt-2 space-y-1">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Who paid their share</p>
-      {periods.map(period => (
+      {periods.map(period => {
+        const periodDeds = deductions.filter(d => (d.period ?? null) === (period ?? null))
+        const shares = effectiveShares(amount, participants, entry.participant_amounts, periodDeds)
+        return (
         <div key={period ?? 'm'} className="flex items-center gap-1.5 flex-wrap">
           {participants.map(pid => {
             const settled = isSettled(pid, period)
-            const share = shareOf(amount, participants, entry.participant_amounts, pid)
+            const share = shares[pid] ?? 0
             return (
               <button
                 key={pid}
@@ -83,7 +79,8 @@ export function SplitTracker({ entry, amount, people, month, year, onToggle }) {
             )
           })}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

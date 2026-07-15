@@ -8,6 +8,7 @@ from app.models.loan import Loan
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.models.expense import Expense, ExpenseParticipantSettlement
+from app.models.deduction import Deduction
 
 ME_ID = 0  # sentinel for "Me" in participants lists
 
@@ -31,6 +32,85 @@ def my_share(total, participants, participant_amounts):
     if not parts or ME_ID not in parts:
         return float(total)
     return participant_share(total, parts, participant_amounts, ME_ID)
+
+
+def effective_shares(total, participants, participant_amounts, deductions):
+    """Per-person shares after this period's deductions.
+
+    A deduction attributed to a participant covers that person's share first;
+    the excess, plus any unattributed (generic) deductions, shrinks everyone's
+    remaining shares proportionally — which also scales custom splits.
+    """
+    parts = participants or []
+    shares = {pid: participant_share(total, parts, participant_amounts, pid) for pid in parts}
+    pool = 0.0
+    for d in deductions or []:
+        amt = float(d.amount or 0)
+        if d.person_id is not None and d.person_id in shares:
+            covered = min(amt, shares[d.person_id])
+            shares[d.person_id] -= covered
+            pool += amt - covered
+        else:
+            pool += amt
+    remaining = sum(shares.values())
+    if pool > 0 and remaining > 0:
+        ratio = max(0.0, 1.0 - pool / remaining)
+        shares = {pid: sh * ratio for pid, sh in shares.items()}
+    return shares
+
+
+def effective_total(total, deductions):
+    """Amount left after deductions (what's still owed to the outside payee)."""
+    deducted = sum(float(d.amount or 0) for d in deductions or [])
+    return max(0.0, float(total or 0) - deducted)
+
+
+def my_effective_share(total, participants, participant_amounts, deductions):
+    """My cost after deductions: full remainder if the item isn't split with me."""
+    parts = participants or []
+    if not parts or ME_ID not in parts:
+        return effective_total(total, deductions)
+    return effective_shares(total, parts, participant_amounts, deductions).get(ME_ID, 0.0)
+
+
+def deduction_source_extra(total, participants, participant_amounts, deductions):
+    """Extra fields for a balance source when deductions apply, so the UI can
+    show the derivation (e.g. "4,000 − 2,000 = 2,000 ÷ 4 = 500").
+    equal_split is True when the simple ÷-count formula holds: no custom
+    amounts and no person-attributed deductions."""
+    ded_total = sum(float(d.amount or 0) for d in deductions or [])
+    if ded_total <= 0:
+        return {}
+    parts = participants or []
+    pa = participant_amounts or {}
+    equal = all(d.person_id is None for d in deductions) and not any(
+        pa.get(str(p)) not in (None, "") for p in parts)
+    notes = "; ".join(d.note for d in deductions if d.note)
+    return {
+        "orig_amount": round(float(total or 0), 2),
+        "deducted": round(ded_total, 2),
+        "share_count": len(parts) if parts else 1,
+        "equal_split": equal,
+        **({"ded_note": notes} if notes else {}),
+    }
+
+
+def deductions_map(db, user, month, year):
+    """This month's deductions keyed by (item_type, item_id, period)."""
+    rows = db.query(Deduction).filter(
+        Deduction.user_id == user.id,
+        Deduction.month == month,
+        Deduction.year == year,
+    ).all()
+    out = {}
+    for d in rows:
+        out.setdefault((d.item_type, d.item_id, d.period), []).append(d)
+    return out
+
+
+def item_deductions(deds, item_type, item_id):
+    """All of an item's deductions this month, across periods."""
+    return [d for key, rows in deds.items() if key[0] == item_type and key[1] == item_id for d in rows]
 
 
 def period_of(due_day):
@@ -101,6 +181,7 @@ def compute_people_balances(db, user, month, year, period=None):
     loans = db.query(Loan).filter(Loan.user_id == user.id, Loan.status == "active").all()
     bills = active_bills(db, user, month, year)
     installments = active_installments(db, user, month, year)
+    deds = deductions_map(db, user, month, year)
 
     bal: dict[int, list] = {}
 
@@ -150,15 +231,21 @@ def compute_people_balances(db, user, month, year, period=None):
             paid_check = prd if bill.frequency == "biweekly" else None
             item_paid = _bill_paid(bill.id, paid_check)
             settle_period = prd if bill.frequency == "biweekly" else None
+            bill_deds = deds.get(("bill", bill.id, settle_period), [])
+            shares = effective_shares(bill.amount, parts, bill.participant_amounts, bill_deds)
+            ded_extra = deduction_source_extra(bill.amount, parts, bill.participant_amounts, bill_deds)
             for pid in non_me:
                 if (bill.id, pid, settle_period) in bill_settled:
                     continue
-                share = participant_share(bill.amount, parts, bill.participant_amounts, pid)
-                _add(pid, "owed_to_me", "bill", bill.name, share, prd, split=split,
-                     id=bill.id, settle_period=settle_period, awaiting=item_paid)
+                extra = dict(ded_extra, base_share=round(
+                    participant_share(bill.amount, parts, bill.participant_amounts, pid), 2)) if ded_extra else {}
+                _add(pid, "owed_to_me", "bill", bill.name, shares.get(pid), prd, split=split,
+                     id=bill.id, settle_period=settle_period, awaiting=item_paid, **extra)
             if bill.payable_to and not item_paid:
-                _add(bill.payable_to, "i_owe", "bill", bill.name, bill.amount, prd, split=split,
-                     id=bill.id, settle_period=paid_check)
+                extra = dict(ded_extra, base_share=round(float(bill.amount or 0), 2)) if ded_extra else {}
+                _add(bill.payable_to, "i_owe", "bill", bill.name,
+                     effective_total(bill.amount, bill_deds), prd, split=split,
+                     id=bill.id, settle_period=paid_check, **extra)
 
     # 3. Installments this month
     inst_payments = db.query(InstallmentPayment).filter(
@@ -187,13 +274,17 @@ def compute_people_balances(db, user, month, year, period=None):
             paid_check = prd if inst.frequency == "biweekly" else None
             item_paid = _inst_paid(inst.id, paid_check)
             settle_period = prd if inst.frequency == "biweekly" else None
+            inst_deds = deds.get(("installment", inst.id, settle_period), [])
+            shares = effective_shares(inst.installment_amount, parts, inst.participant_amounts, inst_deds)
+            ded_extra = deduction_source_extra(inst.installment_amount, parts, inst.participant_amounts, inst_deds)
             for pid in non_me:
                 if (inst.id, pid, settle_period) in inst_settled:
                     continue
-                share = participant_share(inst.installment_amount, parts, inst.participant_amounts, pid)
-                _add(pid, "owed_to_me", "installment", inst.name, share, prd,
+                extra = dict(ded_extra, base_share=round(
+                    participant_share(inst.installment_amount, parts, inst.participant_amounts, pid), 2)) if ded_extra else {}
+                _add(pid, "owed_to_me", "installment", inst.name, shares.get(pid), prd,
                      term=term, total_terms=inst.total_terms, split=True,
-                     id=inst.id, settle_period=settle_period, awaiting=item_paid)
+                     id=inst.id, settle_period=settle_period, awaiting=item_paid, **extra)
 
     # 4. Expenses this month
     expenses = db.query(Expense).filter(
@@ -214,17 +305,24 @@ def compute_people_balances(db, user, month, year, period=None):
         label = exp.name or exp.note or exp.category
         split = len(parts) > 1
 
+        exp_deds = deds.get(("expense", exp.id, None), [])
+        shares = effective_shares(exp.amount, parts, exp.participant_amounts, exp_deds)
+        ded_extra = deduction_source_extra(exp.amount, parts, exp.participant_amounts, exp_deds)
+
         creditor = exp.payable_to or (exp.paid_by if exp.paid_by not in (None, ME_ID) else None)
         if creditor and not exp.is_paid:
-            _add(creditor, "i_owe", "expense", label, exp.amount, exp.period, split=split, id=exp.id)
+            extra = dict(ded_extra, base_share=round(float(exp.amount or 0), 2)) if ded_extra else {}
+            _add(creditor, "i_owe", "expense", label, effective_total(exp.amount, exp_deds),
+                 exp.period, split=split, id=exp.id, **extra)
 
         participants_cleared = exp.is_paid and not creditor
         for pid in non_me:
             if participants_cleared or (exp.id, pid) in exp_settled:
                 continue
-            share = participant_share(exp.amount, parts, exp.participant_amounts, pid)
-            _add(pid, "owed_to_me", "expense", label, share, exp.period, split=split, id=exp.id,
-                 awaiting=creditor is None or exp.is_paid)
+            extra = dict(ded_extra, base_share=round(
+                participant_share(exp.amount, parts, exp.participant_amounts, pid), 2)) if ded_extra else {}
+            _add(pid, "owed_to_me", "expense", label, shares.get(pid), exp.period, split=split, id=exp.id,
+                 awaiting=creditor is None or exp.is_paid, **extra)
 
     result = []
     for pid, sources in bal.items():

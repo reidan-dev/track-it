@@ -5,6 +5,7 @@ from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.expense import Expense, ExpenseParticipantSettlement
+from app.models.deduction import Deduction
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate, ExpenseOut
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
@@ -111,6 +112,7 @@ def delete_expense(
     expense = db.query(Expense).filter(Expense.id == expense_id, Expense.user_id == current_user.id).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
+    db.query(Deduction).filter(Deduction.item_type == "expense", Deduction.item_id == expense_id).delete()
     db.delete(expense)
     db.commit()
 

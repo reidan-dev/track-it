@@ -5,6 +5,7 @@ from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
+from app.models.deduction import Deduction
 from app.schemas.bill import BillCreate, BillUpdate, BillOut
 
 router = APIRouter(prefix="/bills", tags=["bills"])
@@ -57,6 +58,7 @@ def delete_bill(
     bill = db.query(Bill).filter(Bill.id == bill_id, Bill.user_id == current_user.id).first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
+    db.query(Deduction).filter(Deduction.item_type == "bill", Deduction.item_id == bill_id).delete()
     db.delete(bill)
     db.commit()
 

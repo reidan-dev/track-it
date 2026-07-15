@@ -23,6 +23,8 @@ import { involvedPeople } from '@/lib/involved'
 import { ownershipOf, awaitingAmount } from '@/lib/ownership'
 import { OwnershipStripe, OwnerChip, AwaitingChip, TriCheck } from '@/components/shared/OwnershipBadges'
 import { settledPersonIds, isSplit, allSettledAfterToggle } from '@/lib/settlement'
+import { useDeductions, deductionsFor, remainingAmount } from '@/lib/deductions'
+import { DeductionsPanel } from '@/components/shared/DeductionsPanel'
 import { Plus, Trash2, Pencil, Users, Paperclip, CalendarClock, CheckCircle, Circle, Search, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useOptimistic, tempId } from '@/lib/optimistic'
@@ -79,6 +81,7 @@ export default function Expenses() {
   })
   const expenses = searching ? searchResults : monthExpenses
   const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
+  const allDeductions = useDeductions(month, year)
 
   const expensesKey = ['expenses', month, year, period]
   const also = [['expenses'], ['dashboard']]
@@ -234,6 +237,7 @@ export default function Expenses() {
                   const parts = e.participants || []
                   const hasSplit = parts.length > 1
                   const creditor = creditorOf(e)
+                  const deductions = deductionsFor(allDeductions, 'expense', e.id)
                   const involved = involvedFor(e)
                   const own = ownershipOf(e, people)
                   const others = parts.filter(p => p !== ME_ID)
@@ -262,7 +266,7 @@ export default function Expenses() {
                   // someone else fronted it and I haven't repaid them yet.
                   const awaiting = own?.tier === 'owner' || (creditor && !e.is_paid)
                     ? 0
-                    : awaitingAmount(e, e.amount, e.month, e.year, [null])
+                    : awaitingAmount(e, e.amount, e.month, e.year, [null], deductions)
                   const settledIds = [...settledPersonIds(e, e.month, e.year)]
                   const avatarProps = {
                     ids: involved.ids, people, roles: involved.roles, title: 'Involved',
@@ -309,7 +313,7 @@ export default function Expenses() {
                                   {e.is_paid
                                     ? <span className="text-green-600 dark:text-green-400 font-medium">· repaid</span>
                                     : <>
-                                        <span className="text-red-500 font-medium">· you owe {formatCurrency(e.amount)}</span>
+                                        <span className="text-red-500 font-medium">· you owe {formatCurrency(remainingAmount(e.amount, deductions))}</span>
                                         {e.due_date && <span className="text-muted-foreground">· by {e.due_date}</span>}
                                       </>}
                                 </div>
@@ -333,8 +337,23 @@ export default function Expenses() {
                             people={people}
                             month={e.month}
                             year={e.year}
+                            deductions={deductions}
                             onToggle={(personId) => toggleShare(e, personId)}
                           />
+                          {(hasSplit || deductions.length > 0) && (
+                            <div className="mt-2">
+                              <DeductionsPanel
+                                itemType="expense"
+                                itemId={e.id}
+                                amount={e.amount}
+                                participants={parts}
+                                people={people}
+                                month={e.month}
+                                year={e.year}
+                                deductions={deductions}
+                              />
+                            </div>
+                          )}
                         </div>
                       </SwipeableRow>
                     </li>

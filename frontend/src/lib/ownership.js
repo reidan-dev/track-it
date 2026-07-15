@@ -5,6 +5,7 @@
 //   fronted — someone else fronted it / receives the payment (paid_by / payable_to)
 //   shared  — split between me and others
 import { settledPersonIds } from '@/lib/settlement'
+import { effectiveShares } from '@/lib/deductions'
 
 const ME_ID = 0
 
@@ -40,17 +41,18 @@ export function ownershipOf(entry, people) {
 // Total of other participants' shares that are still unsettled for the given
 // already-paid periods (pass [null] for monthly items, paid period numbers for
 // biweekly ones, [] when the item isn't paid yet).
-export function awaitingAmount(entry, amount, month, year, paidPeriods) {
+export function awaitingAmount(entry, amount, month, year, paidPeriods, deductions = []) {
   const parts = entry.participants || []
   const others = parts.filter((id) => id !== ME_ID)
   if (!others.length || !paidPeriods.length || !amount) return 0
   let total = 0
   for (const period of paidPeriods) {
     const settled = settledPersonIds(entry, month, year, period)
+    const shares = effectiveShares(amount, parts, entry.participant_amounts,
+      deductions.filter((d) => (d.period ?? null) === (period ?? null)))
     for (const pid of others) {
       if (settled.has(pid)) continue
-      const custom = entry.participant_amounts?.[String(pid)]
-      total += custom != null && custom !== '' ? parseFloat(custom) : parseFloat(amount) / parts.length
+      total += shares[pid] ?? 0
     }
   }
   return total

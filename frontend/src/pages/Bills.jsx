@@ -22,6 +22,8 @@ import { involvedPeople } from '@/lib/involved'
 import { ownershipOf, awaitingAmount } from '@/lib/ownership'
 import { OwnershipStripe, OwnerChip, AwaitingChip, TriCheck } from '@/components/shared/OwnershipBadges'
 import { settledPersonIds } from '@/lib/settlement'
+import { useDeductions, deductionsFor, remainingAmount } from '@/lib/deductions'
+import { DeductionsPanel } from '@/components/shared/DeductionsPanel'
 
 const BILL_CATEGORIES = ['Rent', 'Utilities', 'Subscription', 'Insurance', 'Other']
 const EMPTY_FORM = {
@@ -41,6 +43,7 @@ export default function Bills() {
 
   const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: () => getBills().then(r => r.data) })
   const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
+  const allDeductions = useDeductions(MONTH, YEAR)
 
   const activeBills = bills.filter(b => {
     const started = b.start_year * 100 + b.start_month <= YEAR * 100 + MONTH
@@ -182,8 +185,9 @@ export default function Bills() {
     addMutation.mutate({ ...base, frequency: 'monthly', due_day: parseInt(form.due_day), start_month: MONTH, start_year: YEAR })
   }
 
-  const totalFullyPaid = activeBills.filter(isFullyPaid).reduce((s, b) => s + (parseFloat(b.amount) || 0), 0)
-  const totalUnpaid = activeBills.filter(b => !isFullyPaid(b)).reduce((s, b) => s + (parseFloat(b.amount) || 0), 0)
+  const netOfDeds = (b) => remainingAmount(b.amount, deductionsFor(allDeductions, 'bill', b.id))
+  const totalFullyPaid = activeBills.filter(isFullyPaid).reduce((s, b) => s + netOfDeds(b), 0)
+  const totalUnpaid = activeBills.filter(b => !isFullyPaid(b)).reduce((s, b) => s + netOfDeds(b), 0)
 
   const sortPaidLast = (arr) => [...arr].sort((a, b) => Number(isFullyPaid(a)) - Number(isFullyPaid(b)))
 
@@ -199,10 +203,12 @@ export default function Bills() {
     const payee = bill.payable_to ? people.find(p => p.id === bill.payable_to) : null
     const involved = involvedPeople(bill)
     const own = ownershipOf(bill, people)
+    const deductions = deductionsFor(allDeductions, 'bill', bill.id)
+    const remainingBill = remainingAmount(bill.amount, deductions)
     const paidPeriods = biweekly
       ? [1, 2].filter(per => (bill.payments || []).some(p => p.period === per && p.month === MONTH && p.year === YEAR))
       : (paid ? [null] : [])
-    const awaiting = own?.tier === 'owner' ? 0 : awaitingAmount(bill, bill.amount, MONTH, YEAR, paidPeriods)
+    const awaiting = own?.tier === 'owner' ? 0 : awaitingAmount(bill, bill.amount, MONTH, YEAR, paidPeriods, deductions)
     const avatarProps = {
       ids: involved.ids, people, roles: involved.roles, title: 'Involved',
       ...(hasSplit && !biweekly ? { settleableIds: parts, settledIds: [...settledPersonIds(bill, MONTH, YEAR, null)], onToggleSettled: (pid) => toggleShareBill(bill, pid) } : {}),
@@ -252,12 +258,15 @@ export default function Bills() {
             </div>
           </button>
 
-          {/* Amount */}
-          <span className={cn('text-sm font-semibold shrink-0', paid && 'text-muted-foreground line-through')}>
+          {/* Amount (net of this month's deductions) */}
+          <span className={cn('text-sm font-semibold shrink-0 text-right', paid && 'text-muted-foreground line-through')}>
             {bill.amount != null
-              ? biweekly ? `${formatCurrency(bill.amount)}×2` : formatCurrency(bill.amount)
+              ? biweekly ? `${formatCurrency(bill.amount)}×2` : formatCurrency(deductions.length ? remainingBill : bill.amount)
               : <span className="text-muted-foreground text-xs font-normal">variable</span>
             }
+            {!biweekly && deductions.length > 0 && (
+              <span className="block text-[10px] text-muted-foreground font-normal line-through">{formatCurrency(bill.amount)}</span>
+            )}
           </span>
 
           <button onClick={onToggleOpen} className="shrink-0 text-muted-foreground hover:text-foreground">
@@ -274,12 +283,23 @@ export default function Bills() {
               </div>
             )}
             {bill.notes && <p className="text-xs text-muted-foreground">{bill.notes}</p>}
+            {bill.amount != null && <DeductionsPanel
+              itemType="bill"
+              itemId={bill.id}
+              amount={bill.amount}
+              participants={parts}
+              people={people}
+              month={MONTH}
+              year={YEAR}
+              deductions={deductions}
+            />}
             <SplitTracker
               entry={bill}
               amount={bill.amount}
               people={people}
               month={MONTH}
               year={YEAR}
+              deductions={deductions}
               onToggle={(personId, period, settled) => period == null
                 ? toggleShareBill(bill, personId)
                 : settleMutation.mutate({ id: bill.id, personId, period, settled })}

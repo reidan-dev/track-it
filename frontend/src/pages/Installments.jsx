@@ -23,6 +23,8 @@ import { involvedPeople } from '@/lib/involved'
 import { ownershipOf, awaitingAmount } from '@/lib/ownership'
 import { OwnershipStripe, OwnerChip, AwaitingChip, TriCheck } from '@/components/shared/OwnershipBadges'
 import { settledPersonIds } from '@/lib/settlement'
+import { useDeductions, deductionsFor, remainingAmount } from '@/lib/deductions'
+import { DeductionsPanel } from '@/components/shared/DeductionsPanel'
 
 const now = new Date()
 
@@ -84,6 +86,7 @@ export default function Installments() {
   })
 
   const { month: M, year: Y } = usePeriod()
+  const allDeductions = useDeductions(M, Y)
 
   const isPaidPeriod = (inst, period) =>
     inst.payments?.some(p => p.month === M && p.year === Y && p.period === period)
@@ -246,7 +249,7 @@ export default function Installments() {
     addMutation.mutate({ ...base, frequency: 'monthly', due_day: form.due_day || null })
   }
 
-  const perMonth = (i) => parseFloat(i.installment_amount) * (i.frequency === 'biweekly' ? 2 : 1)
+  const perMonth = (i) => remainingAmount(i.installment_amount, deductionsFor(allDeductions, 'installment', i.id)) * (i.frequency === 'biweekly' ? 2 : 1)
   const paidThisMonth = activeList.filter(isFullyPaidThisMonth).reduce((s, i) => s + perMonth(i), 0)
   const unpaidThisMonth = activeList.filter(i => !isFullyPaidThisMonth(i)).reduce((s, i) => s + perMonth(i), 0)
 
@@ -260,10 +263,12 @@ export default function Installments() {
     const hasSplit = parts.length > 1
     const involved = involvedPeople(inst)
     const own = ownershipOf(inst, people)
+    const deductions = deductionsFor(allDeductions, 'installment', inst.id)
+    const remainingTerm = remainingAmount(inst.installment_amount, deductions)
     const paidPeriods = biweekly
       ? [1, 2].filter(per => isPaidPeriod(inst, per))
       : (fullyPaid ? [null] : [])
-    const awaiting = own?.tier === 'owner' || completed ? 0 : awaitingAmount(inst, inst.installment_amount, M, Y, paidPeriods)
+    const awaiting = own?.tier === 'owner' || completed ? 0 : awaitingAmount(inst, inst.installment_amount, M, Y, paidPeriods, deductions)
     const avatarProps = {
       ids: involved.ids, people, roles: involved.roles, title: 'Involved',
       ...(hasSplit && !biweekly && !completed ? { settleableIds: parts, settledIds: [...settledPersonIds(inst, M, Y, null)], onToggleSettled: (pid) => toggleShareInst(inst, pid) } : {}),
@@ -317,10 +322,12 @@ export default function Installments() {
               </div>
             </button>
 
-            {/* Per-term amount */}
+            {/* Per-term amount (net of this month's deductions) */}
             <div className="text-right shrink-0">
-              <span className="text-sm font-semibold block">{formatCurrency(inst.installment_amount)}</span>
-              <span className="text-[10px] text-muted-foreground">/term</span>
+              <span className="text-sm font-semibold block">{formatCurrency(deductions.length ? remainingTerm : inst.installment_amount)}</span>
+              {deductions.length > 0
+                ? <span className="text-[10px] text-muted-foreground line-through">{formatCurrency(inst.installment_amount)}</span>
+                : <span className="text-[10px] text-muted-foreground">/term</span>}
             </div>
 
             <button onClick={onToggleOpen} className="shrink-0 text-muted-foreground hover:text-foreground">
@@ -345,12 +352,25 @@ export default function Installments() {
               {inst.payment_method && <PaymentMethodBadge value={inst.payment_method} />}
             </div>
             {inst.notes && <p className="text-xs text-muted-foreground">{inst.notes}</p>}
+            {!completed && (
+              <DeductionsPanel
+                itemType="installment"
+                itemId={inst.id}
+                amount={inst.installment_amount}
+                participants={parts}
+                people={people}
+                month={M}
+                year={Y}
+                deductions={deductions}
+              />
+            )}
             <SplitTracker
               entry={inst}
               amount={inst.installment_amount}
               people={people}
               month={M}
               year={Y}
+              deductions={deductions}
               onToggle={(personId, period, settled) => period == null
                 ? toggleShareInst(inst, personId)
                 : settleMutation.mutate({ id: inst.id, personId, period, settled })}

@@ -13,7 +13,10 @@ from app.models.installment import Installment, InstallmentPayment, InstallmentP
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.loan import Loan
 from app.models.income import Income
-from app.finance import compute_people_balances
+from app.finance import (
+    compute_people_balances, deductions_map, item_deductions,
+    effective_shares, effective_total, my_effective_share,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -61,6 +64,11 @@ def get_summary(
     m = month or today.month
     y = year or today.year
 
+    deds = deductions_map(db, current_user, m, y)
+
+    def _remaining(item_type, item_id, amount):
+        return effective_total(amount, item_deductions(deds, item_type, item_id))
+
     total_income = db.query(func.sum(Income.amount)).filter(
         Income.user_id == current_user.id,
         Income.month == m,
@@ -87,7 +95,7 @@ def get_summary(
         Installment.user_id == current_user.id,
         Installment.status == "active",
     ).all()
-    total_installments = sum(i.installment_amount for i in active_installments)
+    total_installments = sum(_remaining("installment", i.id, i.installment_amount) for i in active_installments)
 
     active_bills = db.query(Bill).filter(
         Bill.user_id == current_user.id,
@@ -101,10 +109,10 @@ def get_summary(
             BillPayment.bill_id.in_([b.id for b in active_bills]),
         ).all()
     }
-    total_bills = sum(b.amount or 0 for b in active_bills)
+    total_bills = sum(_remaining("bill", b.id, b.amount) for b in active_bills)
     unpaid_bills_count = sum(1 for b in active_bills if b.id not in paid_bill_ids)
-    bills_paid_amount = float(sum(b.amount or 0 for b in active_bills if b.id in paid_bill_ids))
-    bills_unpaid_amount = float(sum(b.amount or 0 for b in active_bills if b.id not in paid_bill_ids))
+    bills_paid_amount = float(sum(_remaining("bill", b.id, b.amount) for b in active_bills if b.id in paid_bill_ids))
+    bills_unpaid_amount = float(sum(_remaining("bill", b.id, b.amount) for b in active_bills if b.id not in paid_bill_ids))
 
     seven_days = today + timedelta(days=7)
     upcoming = []
@@ -115,7 +123,7 @@ def get_summary(
                 "type": "bill",
                 "id": bill.id,
                 "name": bill.name,
-                "amount": float(bill.amount or 0),
+                "amount": _remaining("bill", bill.id, bill.amount),
                 "due_date": due_date.isoformat(),
             })
 
@@ -130,7 +138,7 @@ def get_summary(
                 "type": "installment",
                 "id": inst.id,
                 "name": inst.name,
-                "amount": float(inst.installment_amount),
+                "amount": _remaining("installment", inst.id, inst.installment_amount),
                 "due_date": date(y, m, 1).isoformat(),
             })
 
@@ -150,23 +158,26 @@ def get_summary(
                     "terms_remaining": remaining_terms,
                 })
 
-    net_position = float(total_income - total_expenses - total_installments - total_bills)
+    net_position = float(total_income) - float(total_expenses) - float(total_installments) - float(total_bills)
 
     # Net cash considering only MY share of bills/installments/expenses (others'
     # shares are reimbursed to me, so they shouldn't count against my cash).
     my_bills_total = sum(
-        _my_share(b.amount, b.participants, b.participant_amounts) for b in active_bills
+        my_effective_share(b.amount, b.participants, b.participant_amounts,
+                           item_deductions(deds, "bill", b.id))
+        for b in active_bills
     )
     my_installments_total = sum(
-        _my_share(i.installment_amount, i.participants, i.participant_amounts)
+        my_effective_share(i.installment_amount, i.participants, i.participant_amounts,
+                           item_deductions(deds, "installment", i.id))
         for i in active_installments
     )
 
     def _my_expense_cost(exp):
-        parts = exp.participants or []
-        non_me = [p for p in parts if p != ME_ID]
-        others = sum(_participant_share(exp.amount, parts, exp.participant_amounts, pid) for pid in non_me)
-        return max(0.0, float(exp.amount) - others)
+        e_deds = item_deductions(deds, "expense", exp.id)
+        shares = effective_shares(exp.amount, exp.participants, exp.participant_amounts, e_deds)
+        others = sum(v for pid, v in shares.items() if pid != ME_ID)
+        return max(0.0, effective_total(exp.amount, e_deds) - others)
 
     my_expenses_total = sum(_my_expense_cost(e) for e in month_expenses)
     net_cash_mine = float(total_income) - my_expenses_total - my_installments_total - my_bills_total

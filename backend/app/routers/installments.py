@@ -5,6 +5,7 @@ from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
+from app.models.deduction import Deduction
 from app.schemas.installment import InstallmentCreate, InstallmentUpdate, InstallmentOut
 
 router = APIRouter(prefix="/installments", tags=["installments"])
@@ -57,6 +58,7 @@ def delete_installment(
     inst = db.query(Installment).filter(Installment.id == inst_id, Installment.user_id == current_user.id).first()
     if not inst:
         raise HTTPException(status_code=404, detail="Installment not found")
+    db.query(Deduction).filter(Deduction.item_type == "installment", Deduction.item_id == inst_id).delete()
     db.delete(inst)
     db.commit()
 

@@ -17,6 +17,18 @@ import { LoadingState } from '@/components/shared/Loading'
 
 const SOURCE_LABELS = { loan: 'Loan', bill: 'Bill', installment: 'Installment', expense: 'Expense' }
 
+// When a deduction applies, the item row shows the ORIGINAL share and a
+// separate "Deduction" row shows this person's cut of it, with the simplified
+// computation when it's an even split (e.g. "2,000 ÷ 4"). Amounts elsewhere
+// (totals, settle-up, net) already use the reduced s.amount.
+function deductionRow(s) {
+  if (!s.deducted || s.base_share == null) return null
+  const dedAmt = s.base_share - s.amount
+  if (dedAmt <= 0.005) return null
+  // Item label is on the row above; just show the computation.
+  return { dedAmt, text: s.equal_split ? `${formatCurrency(s.deducted)} ÷ ${s.share_count}` : '' }
+}
+
 // ── Render selected balances to a PNG canvas (for clipboard/export) ──────────
 const IMG_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
 
@@ -40,7 +52,7 @@ function renderBalancesImage(rows, monthLabel) {
   const scale = Math.max(2, window.devicePixelRatio || 1)
   const fmt = (v) => formatCurrency(v)
   const signed = (amt, positive) => `${positive ? '' : '−'}${fmt(Math.abs(amt))}`
-  const padX = 24, titleH = 56, personH = 32, itemH = 24, totalRowH = 30, gap = 12, botPad = 18
+  const padX = 24, titleH = 56, personH = 32, itemH = 24, dedLineH = 20, totalRowH = 30, gap = 12, botPad = 18
   const contentW = 520
   const W = padX * 2 + contentW
   const amountX = W - padX
@@ -48,7 +60,10 @@ function renderBalancesImage(rows, monthLabel) {
   const descMaxW = amountX - itemX - 100
 
   let bodyH = 0
-  rows.forEach(r => { bodyH += personH + (r.sources?.length || 0) * itemH + totalRowH + gap })
+  rows.forEach(r => {
+    bodyH += personH + totalRowH + gap
+    ;(r.sources || []).forEach(s => { bodyH += itemH + (deductionRow(s) ? dedLineH : 0) })
+  })
   const H = titleH + bodyH + botPad
 
   const canvas = document.createElement('canvas')
@@ -78,11 +93,20 @@ function renderBalancesImage(rows, monthLabel) {
     ;(r.sources || []).forEach(s => {
       const iy = y + itemH / 2
       const owed = s.direction === 'owed_to_me'
+      const ded = deductionRow(s)
       ctx.textAlign = 'left'; ctx.font = `400 12px ${IMG_FONT}`; ctx.fillStyle = '#64748b'
       ctx.fillText(fitText(ctx, sourceDesc(s), descMaxW), itemX, iy)
       ctx.textAlign = 'right'; ctx.font = `400 12px ${IMG_FONT}`; ctx.fillStyle = owed ? '#16a34a' : '#dc2626'
-      ctx.fillText(signed(s.amount, owed), amountX, iy)
+      ctx.fillText(signed(ded ? s.base_share : s.amount, owed), amountX, iy)
       y += itemH
+      if (ded) {
+        const dy = y + dedLineH / 2 - 2
+        ctx.textAlign = 'left'; ctx.font = `400 11px ${IMG_FONT}`; ctx.fillStyle = '#b45309'
+        ctx.fillText(fitText(ctx, `Deduction${ded.text ? ` · ${ded.text}` : ''}`, descMaxW - 8), itemX + 8, dy)
+        ctx.textAlign = 'right'; ctx.font = `400 11px ${IMG_FONT}`
+        ctx.fillText(`${owed ? '−' : '+'}${fmt(ded.dedAmt)}`, amountX, dy)
+        y += dedLineH
+      }
     })
 
     // Per-person total (labeled)
@@ -150,18 +174,32 @@ function PersonBalanceRow({ person, onSettle }) {
         <div className="border-t border-border bg-muted/30 px-2.5 py-2 space-y-1.5">
           {person.sources.map((s, i) => {
             const owed = s.direction === 'owed_to_me'
+            const ded = deductionRow(s)
             return (
-              <div key={i} className="flex items-center justify-between text-xs gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
-                  {s.type === 'installment' && s.total_terms != null && (
-                    <span className="text-[10px] text-muted-foreground shrink-0">( {s.term} / {s.total_terms} )</span>
-                  )}
-                  <span className="text-muted-foreground truncate">{s.type === 'installment' && s.total_terms != null ? '· ' : ''}{s.label}{s.split ? ' *' : ''}</span>
+              <div key={i}>
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
+                    {s.type === 'installment' && s.total_terms != null && (
+                      <span className="text-[10px] text-muted-foreground shrink-0">( {s.term} / {s.total_terms} )</span>
+                    )}
+                    <span className="text-muted-foreground truncate">{s.type === 'installment' && s.total_terms != null ? '· ' : ''}{s.label}{s.split ? ' *' : ''}</span>
+                  </div>
+                  <span className={cn('font-medium shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
+                    {owed ? '' : '−'}{formatCurrency(ded ? s.base_share : s.amount)}
+                  </span>
                 </div>
-                <span className={cn('font-medium shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
-                  {owed ? '' : '−'}{formatCurrency(s.amount)}
-                </span>
+                {ded && (
+                  <div className="flex items-center justify-between text-xs gap-2 mt-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Badge variant="muted" className="text-[10px] text-amber-600 dark:text-amber-400">Deduction</Badge>
+                      <span className="text-muted-foreground truncate">{ded.text}</span>
+                    </div>
+                    <span className="font-medium shrink-0 tabular-nums text-amber-600 dark:text-amber-400">
+                      {owed ? '−' : '+'}{formatCurrency(ded.dedAmt)}
+                    </span>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -261,6 +299,11 @@ function SettleUpModal({ person, month, year, onClose }) {
                   <span className="text-[11px] text-muted-foreground">
                     {owed ? 'they owe you' : 'you owe them'}
                   </span>
+                  {deductionRow(s) && (
+                    <p className="text-[10px] text-amber-600 dark:text-amber-400 tabular-nums">
+                      {formatCurrency(s.base_share)} − {formatCurrency(deductionRow(s).dedAmt)} deduction
+                    </p>
+                  )}
                 </div>
                 {s.type === 'loan' && checked.has(i) ? (
                   <input
