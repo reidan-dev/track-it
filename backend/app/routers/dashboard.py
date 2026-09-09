@@ -14,7 +14,7 @@ from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.loan import Loan
 from app.models.income import Income, IncomeParticipantSettlement
 from app.finance import (
-    compute_people_balances, deductions_map, item_deductions,
+    compute_people_balances, deductions_map, item_deductions, resolved_incomes,
     effective_shares, effective_total, my_effective_share,
 )
 
@@ -34,12 +34,12 @@ def _participant_share(total, participants, participant_amounts, pid):
     return float(total) / count
 
 
-def _income_given_away(inc):
+def _income_given_away(inc, item_deds=None):
     """Sum of an income's shares assigned to anyone other than Me."""
     parts = inc.participants or []
     if not parts:
         return 0.0
-    shares = effective_shares(inc.amount, parts, inc.participant_amounts, [])
+    shares = effective_shares(inc.amount, parts, inc.participant_amounts, item_deds or [])
     return sum(v for pid, v in shares.items() if pid != ME_ID)
 
 
@@ -78,13 +78,11 @@ def get_summary(
     def _remaining(item_type, item_id, amount):
         return effective_total(amount, item_deductions(deds, item_type, item_id))
 
-    month_incomes = db.query(Income).filter(
-        Income.user_id == current_user.id,
-        Income.month == m,
-        Income.year == y,
-    ).all()
+    month_incomes = resolved_incomes(db, current_user, m, y)
     total_income = sum((i.amount for i in month_incomes), Decimal(0))
-    income_given_away = sum(_income_given_away(i) for i in month_incomes)
+    income_given_away = sum(
+        _income_given_away(i, item_deductions(deds, "income", i.id)) for i in month_incomes
+    )
 
     month_expenses = db.query(Expense).filter(
         Expense.user_id == current_user.id,
@@ -370,9 +368,7 @@ def get_trends(
 
     series = []
     for m, y in window:
-        month_incomes = db.query(Income).filter(
-            Income.user_id == current_user.id, Income.month == m, Income.year == y,
-        ).all()
+        month_incomes = resolved_incomes(db, current_user, m, y)
         income = float(sum((i.amount for i in month_incomes), Decimal(0)))
         income_given_away = sum(_income_given_away(i) for i in month_incomes)
         expenses = float(db.query(func.sum(Expense.amount)).filter(

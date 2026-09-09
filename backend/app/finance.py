@@ -8,8 +8,9 @@ from app.models.loan import Loan
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.models.expense import Expense, ExpenseParticipantSettlement
-from app.models.income import Income, IncomeParticipantSettlement
+from app.models.income import Income, IncomeParticipantSettlement, IncomeReceipt
 from app.models.deduction import Deduction
+from types import SimpleNamespace
 
 ME_ID = 0  # sentinel for "Me" in participants lists
 
@@ -157,6 +158,48 @@ def _relevant_periods(frequency, due_day, period):
     if period is None:
         return base
     return [period] if period in base else []
+
+
+def resolved_incomes(db, user, month, year):
+    """This month's incomes: one-off entries logged for this month/year, plus
+    recurring templates that have been explicitly marked "received" for this
+    month/year (a recurring template with no receipt contributes nothing —
+    that's what makes it need the manual step). Recurring occurrences come
+    back as lightweight proxies carrying the receipt's amount (or the
+    template's default) under the template's own id, so every other piece of
+    income logic (deductions, settlements, participant shares, payable_from)
+    can treat them exactly like a real Income row without any special-casing.
+    """
+    one_off = db.query(Income).filter(
+        Income.user_id == user.id, Income.is_recurring == False,
+        Income.month == month, Income.year == year,
+    ).all()
+
+    templates = db.query(Income).filter(
+        Income.user_id == user.id, Income.is_recurring == True,
+        Income.start_year * 100 + Income.start_month <= year * 100 + month,
+    ).filter(
+        (Income.end_year == None) | (Income.end_year * 100 + (Income.end_month or 12) >= year * 100 + month)
+    ).all()
+    receipts = {
+        r.income_id: r for r in db.query(IncomeReceipt).filter(
+            IncomeReceipt.month == month, IncomeReceipt.year == year,
+            IncomeReceipt.income_id.in_([t.id for t in templates]),
+        ).all()
+    } if templates else {}
+
+    resolved = list(one_off)
+    for t in templates:
+        receipt = receipts.get(t.id)
+        if not receipt:
+            continue
+        resolved.append(SimpleNamespace(
+            id=t.id, source=t.source,
+            amount=receipt.amount_received if receipt.amount_received is not None else t.amount,
+            period=receipt.period, participants=t.participants, participant_amounts=t.participant_amounts,
+            earned_by=t.earned_by, payable_from=t.payable_from,
+        ))
+    return resolved
 
 
 def compute_people_balances(db, user, month, year, period=None):
@@ -327,9 +370,7 @@ def compute_people_balances(db, user, month, year, period=None):
 
     # 5. Shared incomes this month — a participant's share is a credit: it
     # makes them owe me less / me owe them more, so it's added as "i_owe".
-    incomes = db.query(Income).filter(
-        Income.user_id == user.id, Income.month == month, Income.year == year,
-    ).all()
+    incomes = resolved_incomes(db, user, month, year)
     inc_settled = {
         (s.income_id, s.person_id) for s in db.query(IncomeParticipantSettlement).filter(
             IncomeParticipantSettlement.income_id.in_([i.id for i in incomes]),
@@ -350,13 +391,21 @@ def compute_people_balances(db, user, month, year, period=None):
         non_me = [p for p in parts if p != ME_ID]
         if not non_me:
             continue
-        shares = effective_shares(inc.amount, parts, inc.participant_amounts, [])
+        inc_deds = item_deductions(deds, "income", inc.id)
+        shares = effective_shares(inc.amount, parts, inc.participant_amounts, inc_deds)
+        ded_extra = deduction_source_extra(inc.amount, parts, inc.participant_amounts, inc_deds)
         for pid in non_me:
             if (inc.id, pid) in inc_settled:
                 continue
+            extra = {
+                "orig_amount": round(float(inc.amount or 0), 2),
+                "share_count": len(parts) if parts else 1,
+            }
+            if ded_extra:
+                extra.update(ded_extra)
+                extra["base_share"] = round(participant_share(inc.amount, parts, inc.participant_amounts, pid), 2)
             _add(pid, "i_owe", "income", inc.source, shares.get(pid), inc.period,
-                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by,
-                 orig_amount=round(float(inc.amount or 0), 2), share_count=len(parts) if parts else 1)
+                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by, **extra)
 
     result = []
     for pid, sources in bal.items():

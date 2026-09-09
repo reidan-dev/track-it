@@ -8,17 +8,18 @@ from app.models.deduction import Deduction
 from app.models.bill import Bill
 from app.models.installment import Installment
 from app.models.expense import Expense
+from app.models.income import Income
 from app.schemas.deduction import DeductionCreate, DeductionOut
 
 router = APIRouter(prefix="/deductions", tags=["deductions"])
 
-ITEM_MODELS = {"bill": Bill, "installment": Installment, "expense": Expense}
+ITEM_MODELS = {"bill": Bill, "installment": Installment, "expense": Expense, "income": Income}
 
 
 def _owned_item(db, user, item_type, item_id):
     model = ITEM_MODELS.get(item_type)
     if not model:
-        raise HTTPException(status_code=400, detail="item_type must be bill, installment or expense")
+        raise HTTPException(status_code=400, detail="item_type must be bill, installment, expense or income")
     item = db.query(model).filter(model.id == item_id, model.user_id == user.id).first()
     if not item:
         raise HTTPException(status_code=404, detail=f"{item_type.capitalize()} not found")
@@ -57,8 +58,13 @@ def create_deduction(
     item = _owned_item(db, current_user, data.item_type, data.item_id)
     payload = data.model_dump()
     # Expense deductions are pinned to the expense's own month; no periods.
-    if data.item_type == "expense":
+    # A one-off income behaves the same way, but a *recurring* income template
+    # has no single month of its own — trust the caller's month/year, which is
+    # the specific occurrence being deducted from.
+    if data.item_type == "expense" or (data.item_type == "income" and not item.is_recurring):
         payload.update(month=item.month, year=item.year, period=None)
+    elif data.item_type == "income":
+        payload.update(period=None)
     ded = Deduction(user_id=current_user.id, **payload)
     db.add(ded)
     db.commit()

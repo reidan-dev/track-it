@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
-from app.models.income import Income
-from app.schemas.income import IncomeCreate, IncomeUpdate, IncomeOut
+from app.models.income import Income, IncomeReceipt
+from app.models.deduction import Deduction
+from app.schemas.income import IncomeCreate, IncomeUpdate, IncomeOut, IncomeReceiptOut
 
 router = APIRouter(prefix="/income", tags=["income"])
 
@@ -18,9 +20,18 @@ def list_income(
     db: Session = Depends(get_db),
 ):
     q = db.query(Income).filter(Income.user_id == current_user.id)
-    if month:
+    if month and year:
+        # One-off entries logged for this month, plus every recurring
+        # template (regardless of month/year) so the page can show its
+        # "mark received" state for the viewed month — same pattern Bills
+        # uses (list_bills returns everything, the page filters client-side).
+        q = q.filter(or_(
+            Income.is_recurring == True,
+            (Income.month == month) & (Income.year == year),
+        ))
+    elif month:
         q = q.filter(Income.month == month)
-    if year:
+    elif year:
         q = q.filter(Income.year == year)
     return q.order_by(Income.date.desc()).all()
 
@@ -64,5 +75,54 @@ def delete_income(
     income = db.query(Income).filter(Income.id == income_id, Income.user_id == current_user.id).first()
     if not income:
         raise HTTPException(status_code=404, detail="Income entry not found")
+    db.query(Deduction).filter(Deduction.item_type == "income", Deduction.item_id == income_id).delete()
     db.delete(income)
     db.commit()
+
+
+@router.post("/{income_id}/receive/{month}/{year}", response_model=IncomeReceiptOut)
+def receive_income(
+    income_id: int,
+    month: int,
+    year: int,
+    period: int = 1,
+    amount: Optional[float] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    income = db.query(Income).filter(
+        Income.id == income_id, Income.user_id == current_user.id, Income.is_recurring == True).first()
+    if not income:
+        raise HTTPException(status_code=404, detail="Recurring income not found")
+    receipt = db.query(IncomeReceipt).filter(
+        IncomeReceipt.income_id == income_id, IncomeReceipt.month == month, IncomeReceipt.year == year,
+    ).first()
+    if receipt:
+        receipt.period = period
+        receipt.amount_received = amount
+    else:
+        receipt = IncomeReceipt(income_id=income_id, month=month, year=year, period=period, amount_received=amount)
+        db.add(receipt)
+    db.commit()
+    db.refresh(receipt)
+    return receipt
+
+
+@router.delete("/{income_id}/receive/{month}/{year}", status_code=204)
+def unreceive_income(
+    income_id: int,
+    month: int,
+    year: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    income = db.query(Income).filter(
+        Income.id == income_id, Income.user_id == current_user.id, Income.is_recurring == True).first()
+    if not income:
+        raise HTTPException(status_code=404, detail="Recurring income not found")
+    receipt = db.query(IncomeReceipt).filter(
+        IncomeReceipt.income_id == income_id, IncomeReceipt.month == month, IncomeReceipt.year == year,
+    ).first()
+    if receipt:
+        db.delete(receipt)
+        db.commit()

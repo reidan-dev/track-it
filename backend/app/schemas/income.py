@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
 from typing import Optional
-from datetime import date as _date
+from datetime import date as _date, datetime
 from decimal import Decimal
 
 
@@ -17,6 +17,11 @@ class IncomeCreate(BaseModel):
     earned_by: Optional[int] = None
     participants: list[int] = []
     participant_amounts: dict = {}
+    is_recurring: bool = False
+    start_month: Optional[int] = None
+    start_year: Optional[int] = None
+    end_month: Optional[int] = None
+    end_year: Optional[int] = None
 
 
 class IncomeUpdate(BaseModel):
@@ -32,6 +37,25 @@ class IncomeUpdate(BaseModel):
     earned_by: Optional[int] = None
     participants: Optional[list[int]] = None
     participant_amounts: Optional[dict] = None
+    is_recurring: Optional[bool] = None
+    start_month: Optional[int] = None
+    start_year: Optional[int] = None
+    end_month: Optional[int] = None
+    end_year: Optional[int] = None
+
+
+class IncomeReceiptOut(BaseModel):
+    id: int
+    income_id: int
+    month: int
+    year: int
+    period: int
+    amount_received: Optional[Decimal] = None
+    date_received: Optional[_date] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class IncomeOut(BaseModel):
@@ -49,6 +73,12 @@ class IncomeOut(BaseModel):
     earned_by: Optional[int] = None
     participants: list[int] = []
     participant_amounts: dict = {}
+    is_recurring: bool = False
+    start_month: Optional[int] = None
+    start_year: Optional[int] = None
+    end_month: Optional[int] = None
+    end_year: Optional[int] = None
+    receipts: list[IncomeReceiptOut] = []
 
     @field_validator("participants", mode="before")
     @classmethod
