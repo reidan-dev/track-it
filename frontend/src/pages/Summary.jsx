@@ -202,8 +202,8 @@ function PersonBalanceRow({ person, onSettle }) {
                     <span className="text-muted-foreground truncate">
                       {s.type === 'installment' && s.total_terms != null ? '· ' : ''}{s.label}
                       {split ? ` ${split}` : (s.split ? ' *' : '')}
-                      {tag ? ` ${tag}` : ''}
                     </span>
+                    {tag && <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0">{tag}</span>}
                   </div>
                   <span className={cn('font-medium shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
                     {owed ? '' : '−'}{formatCurrency(ded ? s.base_share : s.amount)}
@@ -314,7 +314,8 @@ function SettleUpModal({ person, month, year, onClose }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
-                    <span className="text-sm truncate">{s.label}{splitDesc(s) ? ` ${splitDesc(s)}` : ''}{deductionTag(s) ? ` ${deductionTag(s)}` : ''}</span>
+                    <span className="text-sm truncate">{s.label}{splitDesc(s) ? ` ${splitDesc(s)}` : ''}</span>
+                    {deductionTag(s) && <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0">{deductionTag(s)}</span>}
                   </div>
                   <span className="text-[11px] text-muted-foreground">
                     {owed ? 'they owe you' : 'you owe them'}
