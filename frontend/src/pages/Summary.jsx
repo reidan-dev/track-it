@@ -35,6 +35,12 @@ function splitDesc(s) {
   return `(${formatCurrency(s.orig_amount)} ÷ ${s.share_count})`
 }
 
+// Quick flag next to the label when this source has an active deduction —
+// the computation itself still lives in the separate "Deduction" row.
+function deductionTag(s) {
+  return deductionRow(s) ? '(Deduction)' : null
+}
+
 // ── Render selected balances to a PNG canvas (for clipboard/export) ──────────
 const IMG_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
 
@@ -52,7 +58,8 @@ function sourceDesc(s) {
   }
   const name = s.label && s.label !== type ? ` · ${s.label}` : ''
   const split = splitDesc(s)
-  return `${type}${name}${split ? ` ${split}` : ''}`
+  const tag = deductionTag(s)
+  return `${type}${name}${split ? ` ${split}` : ''}${tag ? ` ${tag}` : ''}`
 }
 
 function renderBalancesImage(rows, monthLabel) {
@@ -183,6 +190,7 @@ function PersonBalanceRow({ person, onSettle }) {
             const owed = s.direction === 'owed_to_me'
             const ded = deductionRow(s)
             const split = splitDesc(s)
+            const tag = deductionTag(s)
             return (
               <div key={i}>
                 <div className="flex items-center justify-between text-xs gap-2">
@@ -194,6 +202,7 @@ function PersonBalanceRow({ person, onSettle }) {
                     <span className="text-muted-foreground truncate">
                       {s.type === 'installment' && s.total_terms != null ? '· ' : ''}{s.label}
                       {split ? ` ${split}` : (s.split ? ' *' : '')}
+                      {tag ? ` ${tag}` : ''}
                     </span>
                   </div>
                   <span className={cn('font-medium shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
@@ -305,7 +314,7 @@ function SettleUpModal({ person, month, year, onClose }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
-                    <span className="text-sm truncate">{s.label}{splitDesc(s) ? ` ${splitDesc(s)}` : ''}</span>
+                    <span className="text-sm truncate">{s.label}{splitDesc(s) ? ` ${splitDesc(s)}` : ''}{deductionTag(s) ? ` ${deductionTag(s)}` : ''}</span>
                   </div>
                   <span className="text-[11px] text-muted-foreground">
                     {owed ? 'they owe you' : 'you owe them'}
