@@ -340,6 +340,12 @@ def compute_people_balances(db, user, month, year, period=None):
     for inc in incomes:
         if period is not None and inc.period != period:
             continue
+
+        # payable_from: someone owes me this income's full amount until received.
+        if inc.payable_from and inc.payable_from != ME_ID and (inc.id, inc.payable_from) not in inc_settled:
+            _add(inc.payable_from, "owed_to_me", "income", inc.source, inc.amount, inc.period,
+                 id=inc.id, earned_by=inc.earned_by)
+
         parts = inc.participants or []
         non_me = [p for p in parts if p != ME_ID]
         if not non_me:
@@ -349,7 +355,8 @@ def compute_people_balances(db, user, month, year, period=None):
             if (inc.id, pid) in inc_settled:
                 continue
             _add(pid, "i_owe", "income", inc.source, shares.get(pid), inc.period,
-                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by)
+                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by,
+                 orig_amount=round(float(inc.amount or 0), 2), share_count=len(parts) if parts else 1)
 
     result = []
     for pid, sources in bal.items():

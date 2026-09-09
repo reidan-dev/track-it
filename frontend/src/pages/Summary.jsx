@@ -29,6 +29,12 @@ function deductionRow(s) {
   return { dedAmt, text: s.equal_split ? `${formatCurrency(s.deducted)} ÷ ${s.share_count}` : '' }
 }
 
+// A shared income's per-person share, e.g. "(₱5,000 ÷ 4)".
+function splitDesc(s) {
+  if (s.type !== 'income' || !s.share_count || s.share_count <= 1 || s.orig_amount == null) return null
+  return `(${formatCurrency(s.orig_amount)} ÷ ${s.share_count})`
+}
+
 // ── Render selected balances to a PNG canvas (for clipboard/export) ──────────
 const IMG_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'
 
@@ -45,7 +51,8 @@ function sourceDesc(s) {
     return `${type} ( ${s.term} / ${s.total_terms} ) · ${s.label}`
   }
   const name = s.label && s.label !== type ? ` · ${s.label}` : ''
-  return `${type}${name}`
+  const split = splitDesc(s)
+  return `${type}${name}${split ? ` ${split}` : ''}`
 }
 
 function renderBalancesImage(rows, monthLabel) {
@@ -175,6 +182,7 @@ function PersonBalanceRow({ person, onSettle }) {
           {person.sources.map((s, i) => {
             const owed = s.direction === 'owed_to_me'
             const ded = deductionRow(s)
+            const split = splitDesc(s)
             return (
               <div key={i}>
                 <div className="flex items-center justify-between text-xs gap-2">
@@ -183,7 +191,10 @@ function PersonBalanceRow({ person, onSettle }) {
                     {s.type === 'installment' && s.total_terms != null && (
                       <span className="text-[10px] text-muted-foreground shrink-0">( {s.term} / {s.total_terms} )</span>
                     )}
-                    <span className="text-muted-foreground truncate">{s.type === 'installment' && s.total_terms != null ? '· ' : ''}{s.label}{s.split ? ' *' : ''}</span>
+                    <span className="text-muted-foreground truncate">
+                      {s.type === 'installment' && s.total_terms != null ? '· ' : ''}{s.label}
+                      {split ? ` ${split}` : (s.split ? ' *' : '')}
+                    </span>
                   </div>
                   <span className={cn('font-medium shrink-0', owed ? 'text-green-600 dark:text-green-400' : 'text-red-500')}>
                     {owed ? '' : '−'}{formatCurrency(ded ? s.base_share : s.amount)}
@@ -294,7 +305,7 @@ function SettleUpModal({ person, month, year, onClose }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <Badge variant="muted" className="text-[10px]">{SOURCE_LABELS[s.type] || s.type}</Badge>
-                    <span className="text-sm truncate">{s.label}</span>
+                    <span className="text-sm truncate">{s.label}{splitDesc(s) ? ` ${splitDesc(s)}` : ''}</span>
                   </div>
                   <span className="text-[11px] text-muted-foreground">
                     {owed ? 'they owe you' : 'you owe them'}
