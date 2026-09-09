@@ -1,19 +1,19 @@
 from pydantic import BaseModel, field_validator
 from typing import Optional
-from datetime import date
+from datetime import date as _date
 from decimal import Decimal
 
 
 class IncomeCreate(BaseModel):
     source: str
     amount: Decimal
-    date: date
+    date: _date
     type: str  # Salary / Freelance / Other
     period: int
     month: int
     year: int
     payable_from: Optional[int] = None
-    due_date: Optional[date] = None
+    due_date: Optional[_date] = None
     earned_by: Optional[int] = None
     participants: list[int] = []
     participant_amounts: dict = {}
@@ -22,13 +22,13 @@ class IncomeCreate(BaseModel):
 class IncomeUpdate(BaseModel):
     source: Optional[str] = None
     amount: Optional[Decimal] = None
-    date: Optional[date] = None
+    date: Optional[_date] = None
     type: Optional[str] = None
     period: Optional[int] = None
     month: Optional[int] = None
     year: Optional[int] = None
     payable_from: Optional[int] = None
-    due_date: Optional[date] = None
+    due_date: Optional[_date] = None
     earned_by: Optional[int] = None
     participants: Optional[list[int]] = None
     participant_amounts: Optional[dict] = None
@@ -39,13 +39,13 @@ class IncomeOut(BaseModel):
     user_id: int
     source: str
     amount: Decimal
-    date: date
+    date: _date
     type: str
     period: int
     month: int
     year: int
     payable_from: Optional[int] = None
-    due_date: Optional[date] = None
+    due_date: Optional[_date] = None
     earned_by: Optional[int] = None
     participants: list[int] = []
     participant_amounts: dict = {}
