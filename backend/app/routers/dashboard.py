@@ -12,7 +12,7 @@ from app.models.expense import Expense, ExpenseParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.loan import Loan
-from app.models.income import Income
+from app.models.income import Income, IncomeParticipantSettlement
 from app.finance import (
     compute_people_balances, deductions_map, item_deductions,
     effective_shares, effective_total, my_effective_share,
@@ -32,6 +32,15 @@ def _participant_share(total, participants, participant_amounts, pid):
         return float(custom)
     count = len(participants) if participants else 1
     return float(total) / count
+
+
+def _income_given_away(inc):
+    """Sum of an income's shares assigned to anyone other than Me."""
+    parts = inc.participants or []
+    if not parts:
+        return 0.0
+    shares = effective_shares(inc.amount, parts, inc.participant_amounts, [])
+    return sum(v for pid, v in shares.items() if pid != ME_ID)
 
 
 def _my_share(total, participants, participant_amounts):
@@ -69,11 +78,13 @@ def get_summary(
     def _remaining(item_type, item_id, amount):
         return effective_total(amount, item_deductions(deds, item_type, item_id))
 
-    total_income = db.query(func.sum(Income.amount)).filter(
+    month_incomes = db.query(Income).filter(
         Income.user_id == current_user.id,
         Income.month == m,
         Income.year == y,
-    ).scalar() or Decimal(0)
+    ).all()
+    total_income = sum((i.amount for i in month_incomes), Decimal(0))
+    income_given_away = sum(_income_given_away(i) for i in month_incomes)
 
     month_expenses = db.query(Expense).filter(
         Expense.user_id == current_user.id,
@@ -180,7 +191,8 @@ def get_summary(
         return max(0.0, effective_total(exp.amount, e_deds) - others)
 
     my_expenses_total = sum(_my_expense_cost(e) for e in month_expenses)
-    net_cash_mine = float(total_income) - my_expenses_total - my_installments_total - my_bills_total
+    my_income_total = float(total_income) - income_given_away
+    net_cash_mine = my_income_total - my_expenses_total - my_installments_total - my_bills_total
 
     people_balances = compute_people_balances(db, current_user, m, y)
 
@@ -299,6 +311,24 @@ def settle_up(
                     month=req.month, year=req.year, period=item.settle_period))
             settled += 1
 
+        elif item.type == "income":
+            inc = db.query(Income).filter(
+                Income.id == item.id, Income.user_id == current_user.id).first()
+            if not inc:
+                continue
+            exists = db.query(IncomeParticipantSettlement).filter(
+                IncomeParticipantSettlement.income_id == inc.id,
+                IncomeParticipantSettlement.person_id == item.person_id,
+                IncomeParticipantSettlement.month == req.month,
+                IncomeParticipantSettlement.year == req.year,
+                IncomeParticipantSettlement.period.is_(None),
+            ).first()
+            if not exists:
+                db.add(IncomeParticipantSettlement(
+                    income_id=inc.id, person_id=item.person_id,
+                    month=req.month, year=req.year, period=None))
+            settled += 1
+
         elif item.type == "loan":
             from app.models.loan import LoanPayment
             loan = db.query(Loan).filter(
@@ -340,9 +370,11 @@ def get_trends(
 
     series = []
     for m, y in window:
-        income = float(db.query(func.sum(Income.amount)).filter(
+        month_incomes = db.query(Income).filter(
             Income.user_id == current_user.id, Income.month == m, Income.year == y,
-        ).scalar() or 0)
+        ).all()
+        income = float(sum((i.amount for i in month_incomes), Decimal(0)))
+        income_given_away = sum(_income_given_away(i) for i in month_incomes)
         expenses = float(db.query(func.sum(Expense.amount)).filter(
             Expense.user_id == current_user.id, Expense.month == m, Expense.year == y,
         ).scalar() or 0)
@@ -371,7 +403,7 @@ def get_trends(
             "label": date(y, m, 1).strftime("%b"),
             "income": round(income, 2),
             "expenses": round(expenses, 2),
-            "net_cash_mine": round(income - expenses - my_bills - my_installments, 2),
+            "net_cash_mine": round((income - income_given_away) - expenses - my_bills - my_installments, 2),
         })
 
     return {"months": months, "series": series}

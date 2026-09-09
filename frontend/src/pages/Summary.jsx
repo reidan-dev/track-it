@@ -15,7 +15,7 @@ import { PullToRefresh } from '@/components/shared/PullToRefresh'
 import { useMonthSwipe } from '@/hooks/useMonthSwipe'
 import { LoadingState } from '@/components/shared/Loading'
 
-const SOURCE_LABELS = { loan: 'Loan', bill: 'Bill', installment: 'Installment', expense: 'Expense' }
+const SOURCE_LABELS = { loan: 'Loan', bill: 'Bill', installment: 'Installment', expense: 'Expense', income: 'Income' }
 
 // When a deduction applies, the item row shows the ORIGINAL share and a
 // separate "Deduction" row shows this person's cut of it, with the simplified
@@ -475,7 +475,7 @@ export default function Summary() {
           <p className="text-4xl font-bold tabular-nums mt-2 tracking-tight">
             {formatCurrency(data.net_cash_mine)}
           </p>
-          <p className="text-xs opacity-75 mt-1">after my share of bills, installments & expenses</p>
+          <p className="text-xs opacity-75 mt-1">after my share of bills, installments & expenses, and income I've shared out</p>
           <div className="mt-5 pt-3 border-t border-primary-foreground/20 flex items-center justify-between text-sm">
             <span className="opacity-80">If I front everyone's full share</span>
             <span className="font-semibold tabular-nums">{formatCurrency(data.net_position)}</span>

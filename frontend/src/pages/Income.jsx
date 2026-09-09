@@ -10,13 +10,17 @@ import { Input, Label, Select } from '@/components/shared/Input'
 import { Badge } from '@/components/shared/Badge'
 import { Modal } from '@/components/shared/Modal'
 import { PersonSelect, personName } from '@/components/shared/PersonSelect'
+import { ParticipantsEditor, ParticipantsBadge, ME_ID } from '@/components/shared/ParticipantsEditor'
 import { formatCurrency, INCOME_TYPES, getBillingPeriod } from '@/lib/utils'
 import { Plus, Trash2, Pencil, CalendarClock } from 'lucide-react'
 import { SkeletonList } from '@/components/shared/Loading'
 import { PersonAvatars } from '@/components/shared/PersonAvatars'
 
 const now = new Date()
-const EMPTY_FORM = { source: '', amount: '', date: now.toISOString().slice(0, 10), type: 'Salary', payable_from: null, due_date: '' }
+const EMPTY_FORM = {
+  source: '', amount: '', date: now.toISOString().slice(0, 10), type: 'Salary', payable_from: null, due_date: '',
+  earned_by: null, participants: [], participant_amounts: {},
+}
 
 export default function Income() {
   const qc = useQueryClient()
@@ -41,7 +45,10 @@ export default function Income() {
   const delMutation = useMutation({ mutationFn: deleteIncome, onSuccess: invalidate })
 
   const openEdit = (e) => {
-    setForm({ source: e.source, amount: String(e.amount), date: e.date, type: e.type, payable_from: e.payable_from ?? null, due_date: e.due_date || '' })
+    setForm({
+      source: e.source, amount: String(e.amount), date: e.date, type: e.type, payable_from: e.payable_from ?? null, due_date: e.due_date || '',
+      earned_by: e.earned_by ?? null, participants: e.participants || [], participant_amounts: e.participant_amounts || {},
+    })
     setEditingId(e.id)
     setShowForm(true)
   }
@@ -85,6 +92,7 @@ export default function Income() {
                 <p className="font-medium text-sm flex items-center gap-1.5 min-w-0">
                   <span className="truncate">{e.source}</span>
                   {e.payable_from != null && <PersonAvatars ids={[e.payable_from]} people={people} roles={{ [e.payable_from]: 'income from' }} title="From" />}
+                  {e.earned_by != null && e.earned_by !== ME_ID && <PersonAvatars ids={[e.earned_by]} people={people} roles={{ [e.earned_by]: 'earned by' }} title="Earned by" />}
                 </p>
                 <div className="flex gap-2 mt-0.5 flex-wrap items-center">
                   <Badge variant="success">{e.type}</Badge>
@@ -96,6 +104,9 @@ export default function Income() {
                     {e.payable_from ? <span>from {personName(people, e.payable_from)}</span> : null}
                     {e.due_date ? <span>· due {e.due_date}</span> : null}
                   </div>
+                )}
+                {e.participants?.length > 0 && (
+                  <ParticipantsBadge participants={e.participants} participantAmounts={e.participant_amounts} people={people} totalAmount={e.amount} />
                 )}
               </div>
               <div className="flex items-center gap-2">
@@ -129,6 +140,18 @@ export default function Income() {
           <div className="space-y-1.5"><Label>Type</Label><Select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>{INCOME_TYPES.map(t => <option key={t}>{t}</option>)}</Select></div>
           <div className="space-y-1.5"><Label>Payable from <span className="text-muted-foreground text-xs">(who pays you — optional)</span></Label><PersonSelect value={form.payable_from} onChange={v => setForm(f => ({ ...f, payable_from: v }))} people={people} /></div>
           <div className="space-y-1.5"><Label>Due date <span className="text-muted-foreground text-xs">(when expected — optional)</span></Label><Input type="date" value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} /></div>
+          <div className="space-y-1.5"><Label>Earned by <span className="text-muted-foreground text-xs">(who this income actually came from — optional, for reference only)</span></Label><PersonSelect value={form.earned_by} onChange={v => setForm(f => ({ ...f, earned_by: v }))} people={people} /></div>
+          <div className="space-y-1.5">
+            <Label>Share with <span className="text-muted-foreground text-xs">(splits this income — each person's share shows as a credit in Summary and lowers your net cash)</span></Label>
+            <ParticipantsEditor
+              participants={form.participants}
+              participantAmounts={form.participant_amounts}
+              onParticipantsChange={v => setForm(f => ({ ...f, participants: v }))}
+              onAmountsChange={v => setForm(f => ({ ...f, participant_amounts: v }))}
+              people={people}
+              totalAmount={form.amount}
+            />
+          </div>
         </form>
       </Modal>
     </div>

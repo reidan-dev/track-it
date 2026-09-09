@@ -8,6 +8,7 @@ from app.models.loan import Loan
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.models.expense import Expense, ExpenseParticipantSettlement
+from app.models.income import Income, IncomeParticipantSettlement
 from app.models.deduction import Deduction
 
 ME_ID = 0  # sentinel for "Me" in participants lists
@@ -323,6 +324,32 @@ def compute_people_balances(db, user, month, year, period=None):
                 participant_share(exp.amount, parts, exp.participant_amounts, pid), 2)) if ded_extra else {}
             _add(pid, "owed_to_me", "expense", label, shares.get(pid), exp.period, split=split, id=exp.id,
                  awaiting=creditor is None or exp.is_paid, **extra)
+
+    # 5. Shared incomes this month — a participant's share is a credit: it
+    # makes them owe me less / me owe them more, so it's added as "i_owe".
+    incomes = db.query(Income).filter(
+        Income.user_id == user.id, Income.month == month, Income.year == year,
+    ).all()
+    inc_settled = {
+        (s.income_id, s.person_id) for s in db.query(IncomeParticipantSettlement).filter(
+            IncomeParticipantSettlement.income_id.in_([i.id for i in incomes]),
+            IncomeParticipantSettlement.month == month, IncomeParticipantSettlement.year == year,
+        ).all()
+    } if incomes else set()
+
+    for inc in incomes:
+        if period is not None and inc.period != period:
+            continue
+        parts = inc.participants or []
+        non_me = [p for p in parts if p != ME_ID]
+        if not non_me:
+            continue
+        shares = effective_shares(inc.amount, parts, inc.participant_amounts, [])
+        for pid in non_me:
+            if (inc.id, pid) in inc_settled:
+                continue
+            _add(pid, "i_owe", "income", inc.source, shares.get(pid), inc.period,
+                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by)
 
     result = []
     for pid, sources in bal.items():

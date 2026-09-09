@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import date
 from decimal import Decimal
@@ -14,6 +14,9 @@ class IncomeCreate(BaseModel):
     year: int
     payable_from: Optional[int] = None
     due_date: Optional[date] = None
+    earned_by: Optional[int] = None
+    participants: list[int] = []
+    participant_amounts: dict = {}
 
 
 class IncomeUpdate(BaseModel):
@@ -26,6 +29,9 @@ class IncomeUpdate(BaseModel):
     year: Optional[int] = None
     payable_from: Optional[int] = None
     due_date: Optional[date] = None
+    earned_by: Optional[int] = None
+    participants: Optional[list[int]] = None
+    participant_amounts: Optional[dict] = None
 
 
 class IncomeOut(BaseModel):
@@ -40,6 +46,19 @@ class IncomeOut(BaseModel):
     year: int
     payable_from: Optional[int] = None
     due_date: Optional[date] = None
+    earned_by: Optional[int] = None
+    participants: list[int] = []
+    participant_amounts: dict = {}
+
+    @field_validator("participants", mode="before")
+    @classmethod
+    def coerce_participants(cls, v):
+        return v if v is not None else []
+
+    @field_validator("participant_amounts", mode="before")
+    @classmethod
+    def coerce_participant_amounts(cls, v):
+        return v if v is not None else {}
 
     class Config:
         from_attributes = True
