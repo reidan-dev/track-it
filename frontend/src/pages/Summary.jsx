@@ -35,10 +35,11 @@ function splitDesc(s) {
   return `(${formatCurrency(s.orig_amount)} ÷ ${s.share_count})`
 }
 
-// Quick flag next to the label when this source has an active deduction —
-// the computation itself still lives in the separate "Deduction" row.
+// Every income participant-share line is money deducted from the income and
+// credited to them, so it's always labeled "(Deduction)" — not just when an
+// extra one-off Deduction record (promo credit/advance) also applies.
 function deductionTag(s) {
-  return deductionRow(s) ? '(Deduction)' : null
+  return s.type === 'income' && s.direction === 'i_owe' ? '(Deduction)' : null
 }
 
 // ── Render selected balances to a PNG canvas (for clipboard/export) ──────────
