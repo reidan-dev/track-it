@@ -153,6 +153,18 @@ def active_installments(db, user, month, year):
     ).all()
 
 
+def installment_term(inst, month, year, prd):
+    """Which term number a specific month/period represents, based on
+    elapsed time since the installment started — NOT on how many terms have
+    been paid so far. That keeps a past month's term label fixed (e.g. "3/12")
+    even after later months get paid, instead of every month showing
+    whatever the latest terms_paid+1 happens to be.
+    """
+    elapsed_months = (year * 12 + month) - (inst.start_year * 12 + inst.start_month)
+    idx = elapsed_months * 2 + (0 if prd == 1 else 1) if inst.frequency == "biweekly" else elapsed_months
+    return max(1, min(idx + 1, inst.total_terms))
+
+
 def _relevant_periods(frequency, due_day, period):
     base = [1, 2] if frequency == "biweekly" else [period_of(due_day)]
     if period is None:
@@ -321,8 +333,8 @@ def compute_people_balances(db, user, month, year, period=None):
         non_me = [p for p in parts if p != ME_ID]
         if not non_me:
             continue
-        term = min((inst.terms_paid or 0) + 1, inst.total_terms)
         for prd in _relevant_periods(inst.frequency, inst.due_day, period):
+            term = installment_term(inst, month, year, prd)
             paid_check = prd if inst.frequency == "biweekly" else None
             item_paid = _inst_paid(inst.id, paid_check)
             settle_period = prd if inst.frequency == "biweekly" else None
