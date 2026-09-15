@@ -153,16 +153,28 @@ def active_installments(db, user, month, year):
     ).all()
 
 
-def installment_term(inst, month, year, prd):
-    """Which term number a specific month/period represents, based on
-    elapsed time since the installment started — NOT on how many terms have
-    been paid so far. That keeps a past month's term label fixed (e.g. "3/12")
-    even after later months get paid, instead of every month showing
-    whatever the latest terms_paid+1 happens to be.
+def installment_term(payment_history, inst, month, year, item_paid, paid_check, unpaid_rank=1):
+    """Which term number a specific month/period represents.
+
+    terms_paid is user-editable directly — bootstrapping a loan that already
+    had payments before it was entered here, with no InstallmentPayment rows
+    to match — so it can run ahead of len(payment_history). That gap is a
+    constant "bootstrap offset" (terms_paid minus however many payments are
+    actually tracked in-app), which stays fixed as more months get paid. A
+    paid occurrence's term is that offset plus its 1-based rank among this
+    installment's tracked payments sorted chronologically — a fixed position
+    that doesn't drift later. An unpaid occurrence has no rank to look up, so
+    it's the next term(s) due (terms_paid + unpaid_rank) — unpaid_rank lets a
+    biweekly installment's two unpaid periods in the same month get
+    consecutive numbers instead of both showing the same "next due" term.
     """
-    elapsed_months = (year * 12 + month) - (inst.start_year * 12 + inst.start_month)
-    idx = elapsed_months * 2 + (0 if prd == 1 else 1) if inst.frequency == "biweekly" else elapsed_months
-    return max(1, min(idx + 1, inst.total_terms))
+    total = inst.total_terms
+    offset = max(0, (inst.terms_paid or 0) - len(payment_history))
+    if item_paid:
+        for idx, ip in enumerate(payment_history):
+            if ip.month == month and ip.year == year and (paid_check is None or ip.period == paid_check):
+                return max(1, min(offset + idx + 1, total))
+    return min((inst.terms_paid or 0) + unpaid_rank, total)
 
 
 def _relevant_periods(frequency, due_day, period):
@@ -316,6 +328,12 @@ def compute_people_balances(db, user, month, year, period=None):
         InstallmentPayment.month == month, InstallmentPayment.year == year,
         InstallmentPayment.installment_id.in_([i.id for i in installments]),
     ).all() if installments else []
+    inst_payment_history = {}
+    if installments:
+        for ip in db.query(InstallmentPayment).filter(
+            InstallmentPayment.installment_id.in_([i.id for i in installments]),
+        ).order_by(InstallmentPayment.year, InstallmentPayment.month, InstallmentPayment.period).all():
+            inst_payment_history.setdefault(ip.installment_id, []).append(ip)
     inst_settled = {
         (s.installment_id, s.person_id, s.period)
         for s in db.query(InstallmentParticipantSettlement).filter(
@@ -333,10 +351,14 @@ def compute_people_balances(db, user, month, year, period=None):
         non_me = [p for p in parts if p != ME_ID]
         if not non_me:
             continue
+        unpaid_rank = 1  # bumps for each unpaid period so a biweekly month's two get consecutive terms
         for prd in _relevant_periods(inst.frequency, inst.due_day, period):
-            term = installment_term(inst, month, year, prd)
             paid_check = prd if inst.frequency == "biweekly" else None
             item_paid = _inst_paid(inst.id, paid_check)
+            term = installment_term(inst_payment_history.get(inst.id, []), inst, month, year,
+                                     item_paid, paid_check, unpaid_rank)
+            if not item_paid:
+                unpaid_rank += 1
             settle_period = prd if inst.frequency == "biweekly" else None
             inst_deds = deds.get(("installment", inst.id, settle_period), [])
             shares = effective_shares(inst.installment_amount, parts, inst.participant_amounts, inst_deds)
