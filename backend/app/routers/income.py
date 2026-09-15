@@ -5,7 +5,7 @@ from typing import Optional
 from app.database import get_db
 from app.auth import get_current_user
 from app.models.user import User
-from app.models.income import Income, IncomeReceipt
+from app.models.income import Income, IncomeReceipt, IncomeParticipantSettlement
 from app.models.deduction import Deduction
 from app.schemas.income import IncomeCreate, IncomeUpdate, IncomeOut, IncomeReceiptOut
 
@@ -126,3 +126,65 @@ def unreceive_income(
     if receipt:
         db.delete(receipt)
         db.commit()
+
+
+@router.post("/{income_id}/settle/{person_id}/{month}/{year}", response_model=IncomeOut)
+def settle_income_participant(
+    income_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Marks one participant's split share settled — independent of whether
+    the income itself has been marked received yet."""
+    income = db.query(Income).filter(Income.id == income_id, Income.user_id == current_user.id).first()
+    if not income:
+        raise HTTPException(status_code=404, detail="Income entry not found")
+    q = db.query(IncomeParticipantSettlement).filter(
+        IncomeParticipantSettlement.income_id == income_id,
+        IncomeParticipantSettlement.person_id == person_id,
+        IncomeParticipantSettlement.direction == "i_owe",
+        IncomeParticipantSettlement.month == month,
+        IncomeParticipantSettlement.year == year,
+    )
+    q = q.filter(IncomeParticipantSettlement.period == period) if period is not None else q.filter(IncomeParticipantSettlement.period.is_(None))
+    if not q.first():
+        db.add(IncomeParticipantSettlement(
+            income_id=income_id, person_id=person_id, direction="i_owe",
+            month=month, year=year, period=period,
+        ))
+        db.commit()
+    db.refresh(income)
+    return income
+
+
+@router.delete("/{income_id}/settle/{person_id}/{month}/{year}", response_model=IncomeOut)
+def unsettle_income_participant(
+    income_id: int,
+    person_id: int,
+    month: int,
+    year: int,
+    period: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    income = db.query(Income).filter(Income.id == income_id, Income.user_id == current_user.id).first()
+    if not income:
+        raise HTTPException(status_code=404, detail="Income entry not found")
+    q = db.query(IncomeParticipantSettlement).filter(
+        IncomeParticipantSettlement.income_id == income_id,
+        IncomeParticipantSettlement.person_id == person_id,
+        IncomeParticipantSettlement.direction == "i_owe",
+        IncomeParticipantSettlement.month == month,
+        IncomeParticipantSettlement.year == year,
+    )
+    q = q.filter(IncomeParticipantSettlement.period == period) if period is not None else q.filter(IncomeParticipantSettlement.period.is_(None))
+    row = q.first()
+    if row:
+        db.delete(row)
+        db.commit()
+    db.refresh(income)
+    return income

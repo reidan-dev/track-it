@@ -237,9 +237,7 @@ function PersonBalanceRow({ person, onSettle }) {
 // ── Settle-up modal: pick which of a person's items a payment covers ─────────
 function SettleUpModal({ person, month, year, onClose }) {
   const qc = useQueryClient()
-  const [checked, setChecked] = useState(() => new Set(
-    person.sources.map((_, i) => i).filter(i => !person.sources[i].pending)
-  ))
+  const [checked, setChecked] = useState(() => new Set(person.sources.map((_, i) => i)))
   const [loanAmounts, setLoanAmounts] = useState({}) // source index → amount string
 
   const mutation = useMutation({
@@ -312,9 +310,8 @@ function SettleUpModal({ person, month, year, onClose }) {
           {person.sources.map((s, i) => {
             const owed = s.direction === 'owed_to_me'
             return (
-              <label key={i} className={cn('flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent',
-                s.pending ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer')}>
-                <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)} disabled={s.pending}
+              <label key={i} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-accent cursor-pointer">
+                <input type="checkbox" checked={checked.has(i)} onChange={() => toggle(i)}
                   className="w-4 h-4 rounded border-border shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
@@ -324,7 +321,7 @@ function SettleUpModal({ person, month, year, onClose }) {
                     {s.pending && <Badge variant="muted" className="text-[10px] shrink-0">Pending</Badge>}
                   </div>
                   <span className="text-[11px] text-muted-foreground">
-                    {s.pending ? 'not yet received — mark received on the Income page first' : (owed ? 'they owe you' : 'you owe them')}
+                    {owed ? 'they owe you' : 'you owe them'}
                   </span>
                   {deductionRow(s) && (
                     <p className="text-[10px] text-amber-600 dark:text-amber-400 tabular-nums">

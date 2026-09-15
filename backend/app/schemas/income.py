@@ -58,6 +58,20 @@ class IncomeReceiptOut(BaseModel):
         from_attributes = True
 
 
+class IncomeSettlementOut(BaseModel):
+    id: int
+    income_id: int
+    person_id: int
+    direction: Optional[str] = None
+    month: int
+    year: int
+    period: Optional[int] = None
+    settled_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class IncomeOut(BaseModel):
     id: int
     user_id: int
@@ -79,6 +93,7 @@ class IncomeOut(BaseModel):
     end_month: Optional[int] = None
     end_year: Optional[int] = None
     receipts: list[IncomeReceiptOut] = []
+    settlements: list[IncomeSettlementOut] = []
 
     @field_validator("participants", mode="before")
     @classmethod

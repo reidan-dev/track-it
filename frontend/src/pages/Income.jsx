@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { HelpTip } from '@/components/shared/HelpTip'
 import { usePeriod } from '@/contexts/PeriodContext'
-import { getIncome, createIncome, updateIncome, deleteIncome, receiveIncome, unreceiveIncome } from '@/api/income'
+import { getIncome, createIncome, updateIncome, deleteIncome, receiveIncome, unreceiveIncome, settleIncomeParticipant, unsettleIncomeParticipant } from '@/api/income'
 import { getPeople } from '@/api/people'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
@@ -13,6 +13,7 @@ import { PersonSelect, personName } from '@/components/shared/PersonSelect'
 import { ParticipantsEditor, ParticipantsBadge, ME_ID } from '@/components/shared/ParticipantsEditor'
 import { useDeductions, deductionsFor } from '@/lib/deductions'
 import { DeductionsPanel } from '@/components/shared/DeductionsPanel'
+import { SplitTracker } from '@/components/shared/SplitTracker'
 import { formatCurrency, INCOME_TYPES, getBillingPeriod, cn } from '@/lib/utils'
 import { Plus, Trash2, Pencil, CalendarClock, Repeat, Check, X } from 'lucide-react'
 import { SkeletonList } from '@/components/shared/Loading'
@@ -43,6 +44,10 @@ const resolvedAmount = (e, month, year) => {
   return r.amount_received != null ? parseFloat(r.amount_received) : parseFloat(e.amount)
 }
 
+// SplitTracker only cares about participant-share settlements, not the
+// separate payable_from receivable, which can share the same person/month.
+const forSplitTracker = (e) => ({ ...e, settlements: (e.settlements || []).filter(s => s.direction === 'i_owe') })
+
 function RecurringIncomeRow({ entry, month, year, people, allDeductions, onEdit }) {
   const qc = useQueryClient()
   const [editingAmount, setEditingAmount] = useState(false)
@@ -59,6 +64,12 @@ function RecurringIncomeRow({ entry, month, year, people, allDeductions, onEdit 
   })
   const unreceiveMutation = useMutation({
     mutationFn: () => unreceiveIncome(entry.id, month, year),
+    onSuccess: invalidate,
+  })
+  const settleMutation = useMutation({
+    mutationFn: ({ personId, period: prd, settled }) => settled
+      ? unsettleIncomeParticipant(entry.id, personId, month, year, prd)
+      : settleIncomeParticipant(entry.id, personId, month, year, prd),
     onSuccess: invalidate,
   })
   const delMutation = useMutation({
@@ -150,6 +161,16 @@ function RecurringIncomeRow({ entry, month, year, people, allDeductions, onEdit 
             />
           </div>
         )}
+
+        <SplitTracker
+          entry={forSplitTracker(entry)}
+          amount={amount ?? entry.amount}
+          people={people}
+          month={month}
+          year={year}
+          deductions={deductions}
+          onToggle={(personId, prd, settled) => settleMutation.mutate({ personId, period: prd, settled })}
+        />
       </CardContent>
     </Card>
   )
@@ -177,6 +198,14 @@ export default function Income() {
   const addMutation = useMutation({ mutationFn: createIncome, onSuccess: () => { invalidate(); closeForm() } })
   const editMutation = useMutation({ mutationFn: ({ id, data }) => updateIncome(id, data), onSuccess: () => { invalidate(); closeForm() } })
   const delMutation = useMutation({ mutationFn: deleteIncome, onSuccess: invalidate })
+  const settleMutation = useMutation({
+    mutationFn: ({ id, personId, period: prd, settled, m, y }) => settled
+      ? unsettleIncomeParticipant(id, personId, m, y, prd)
+      : settleIncomeParticipant(id, personId, m, y, prd),
+    onSuccess: invalidate,
+  })
+  const toggleShare = (e, personId, prd, settled) =>
+    settleMutation.mutate({ id: e.id, personId, period: prd, settled, m: e.month, y: e.year })
 
   const openEdit = (e) => {
     setForm({
@@ -304,6 +333,15 @@ export default function Income() {
                   deductions={deductions}
                 />
               </div>
+              <SplitTracker
+                entry={forSplitTracker(e)}
+                amount={e.amount}
+                people={people}
+                month={e.month}
+                year={e.year}
+                deductions={deductions}
+                onToggle={(personId, prd, settled) => toggleShare(e, personId, prd, settled)}
+              />
             </CardContent>
           </Card>
         )})}

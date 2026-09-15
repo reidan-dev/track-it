@@ -14,3 +14,9 @@ export const receiveIncome = (id, month, year, { period, amount } = {}) => {
 
 export const unreceiveIncome = (id, month, year) =>
   api.delete(`/income/${id}/receive/${month}/${year}`)
+
+export const settleIncomeParticipant = (id, personId, month, year, period = null) =>
+  api.post(`/income/${id}/settle/${personId}/${month}/${year}`, null, { params: period != null ? { period } : {} })
+
+export const unsettleIncomeParticipant = (id, personId, month, year, period = null) =>
+  api.delete(`/income/${id}/settle/${personId}/${month}/${year}`, { params: period != null ? { period } : {} })
