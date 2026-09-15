@@ -12,7 +12,7 @@ from app.models.expense import Expense, ExpenseParticipantSettlement
 from app.models.installment import Installment, InstallmentPayment, InstallmentParticipantSettlement
 from app.models.bill import Bill, BillPayment, BillParticipantSettlement
 from app.models.loan import Loan
-from app.models.income import Income, IncomeParticipantSettlement
+from app.models.income import Income, IncomeParticipantSettlement, IncomeReceipt
 from app.finance import (
     compute_people_balances, deductions_map, item_deductions, resolved_incomes,
     effective_shares, effective_total, my_effective_share,
@@ -314,6 +314,13 @@ def settle_up(
                 Income.id == item.id, Income.user_id == current_user.id).first()
             if not inc:
                 continue
+            if inc.is_recurring:
+                received = db.query(IncomeReceipt).filter(
+                    IncomeReceipt.income_id == inc.id,
+                    IncomeReceipt.month == req.month, IncomeReceipt.year == req.year,
+                ).first()
+                if not received:
+                    continue  # can't settle a pending (not-yet-received) occurrence
             exists = db.query(IncomeParticipantSettlement).filter(
                 IncomeParticipantSettlement.income_id == inc.id,
                 IncomeParticipantSettlement.person_id == item.person_id,

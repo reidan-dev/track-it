@@ -160,15 +160,18 @@ def _relevant_periods(frequency, due_day, period):
     return [period] if period in base else []
 
 
-def resolved_incomes(db, user, month, year):
+def resolved_incomes(db, user, month, year, include_pending=False):
     """This month's incomes: one-off entries logged for this month/year, plus
     recurring templates that have been explicitly marked "received" for this
-    month/year (a recurring template with no receipt contributes nothing —
-    that's what makes it need the manual step). Recurring occurrences come
-    back as lightweight proxies carrying the receipt's amount (or the
-    template's default) under the template's own id, so every other piece of
-    income logic (deductions, settlements, participant shares, payable_from)
-    can treat them exactly like a real Income row without any special-casing.
+    month/year. By default a recurring template with no receipt contributes
+    nothing — that's what keeps totals/net cash from counting money that
+    hasn't actually come in. Pass include_pending=True (used for the People
+    Balances list, so people can see what to settle ahead of time) to also
+    include not-yet-received templates using their default amount, flagged
+    `pending=True`. Recurring occurrences come back as lightweight proxies
+    under the template's own id, so every other piece of income logic
+    (deductions, settlements, participant shares, payable_from) can treat
+    them exactly like a real Income row without any special-casing.
     """
     one_off = db.query(Income).filter(
         Income.user_id == user.id, Income.is_recurring == False,
@@ -191,14 +194,19 @@ def resolved_incomes(db, user, month, year):
     resolved = list(one_off)
     for t in templates:
         receipt = receipts.get(t.id)
-        if not receipt:
-            continue
-        resolved.append(SimpleNamespace(
-            id=t.id, source=t.source,
-            amount=receipt.amount_received if receipt.amount_received is not None else t.amount,
-            period=receipt.period, participants=t.participants, participant_amounts=t.participant_amounts,
-            earned_by=t.earned_by, payable_from=t.payable_from,
-        ))
+        if receipt:
+            resolved.append(SimpleNamespace(
+                id=t.id, source=t.source,
+                amount=receipt.amount_received if receipt.amount_received is not None else t.amount,
+                period=receipt.period, participants=t.participants, participant_amounts=t.participant_amounts,
+                earned_by=t.earned_by, payable_from=t.payable_from, pending=False,
+            ))
+        elif include_pending:
+            resolved.append(SimpleNamespace(
+                id=t.id, source=t.source, amount=t.amount, period=t.period,
+                participants=t.participants, participant_amounts=t.participant_amounts,
+                earned_by=t.earned_by, payable_from=t.payable_from, pending=True,
+            ))
     return resolved
 
 
@@ -370,7 +378,7 @@ def compute_people_balances(db, user, month, year, period=None):
 
     # 5. Shared incomes this month — a participant's share is a credit: it
     # makes them owe me less / me owe them more, so it's added as "i_owe".
-    incomes = resolved_incomes(db, user, month, year)
+    incomes = resolved_incomes(db, user, month, year, include_pending=True)
     inc_settled = {
         (s.income_id, s.person_id) for s in db.query(IncomeParticipantSettlement).filter(
             IncomeParticipantSettlement.income_id.in_([i.id for i in incomes]),
@@ -382,10 +390,12 @@ def compute_people_balances(db, user, month, year, period=None):
         if period is not None and inc.period != period:
             continue
 
+        pending = getattr(inc, "pending", False)
+
         # payable_from: someone owes me this income's full amount until received.
         if inc.payable_from and inc.payable_from != ME_ID and (inc.id, inc.payable_from) not in inc_settled:
             _add(inc.payable_from, "owed_to_me", "income", inc.source, inc.amount, inc.period,
-                 id=inc.id, earned_by=inc.earned_by)
+                 id=inc.id, earned_by=inc.earned_by, pending=pending)
 
         parts = inc.participants or []
         non_me = [p for p in parts if p != ME_ID]
@@ -405,7 +415,7 @@ def compute_people_balances(db, user, month, year, period=None):
                 extra.update(ded_extra)
                 extra["base_share"] = round(participant_share(inc.amount, parts, inc.participant_amounts, pid), 2)
             _add(pid, "i_owe", "income", inc.source, shares.get(pid), inc.period,
-                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by, **extra)
+                 split=len(parts) > 1, id=inc.id, earned_by=inc.earned_by, pending=pending, **extra)
 
     result = []
     for pid, sources in bal.items():
