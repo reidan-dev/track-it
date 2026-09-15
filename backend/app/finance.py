@@ -413,8 +413,10 @@ def compute_people_balances(db, user, month, year, period=None):
     # 5. Shared incomes this month — a participant's share is a credit: it
     # makes them owe me less / me owe them more, so it's added as "i_owe".
     incomes = resolved_incomes(db, user, month, year, include_pending=True)
+    # Keyed by direction too: the same person can be both payable_from (owed_to_me)
+    # and a participant (i_owe) on the same income, and settling one shouldn't settle the other.
     inc_settled = {
-        (s.income_id, s.person_id) for s in db.query(IncomeParticipantSettlement).filter(
+        (s.income_id, s.person_id, s.direction) for s in db.query(IncomeParticipantSettlement).filter(
             IncomeParticipantSettlement.income_id.in_([i.id for i in incomes]),
             IncomeParticipantSettlement.month == month, IncomeParticipantSettlement.year == year,
         ).all()
@@ -427,7 +429,7 @@ def compute_people_balances(db, user, month, year, period=None):
         pending = getattr(inc, "pending", False)
 
         # payable_from: someone owes me this income's full amount until received.
-        if inc.payable_from and inc.payable_from != ME_ID and (inc.id, inc.payable_from) not in inc_settled:
+        if inc.payable_from and inc.payable_from != ME_ID and (inc.id, inc.payable_from, "owed_to_me") not in inc_settled:
             _add(inc.payable_from, "owed_to_me", "income", inc.source, inc.amount, inc.period,
                  id=inc.id, earned_by=inc.earned_by, pending=pending)
 
@@ -439,7 +441,7 @@ def compute_people_balances(db, user, month, year, period=None):
         shares = effective_shares(inc.amount, parts, inc.participant_amounts, inc_deds)
         ded_extra = deduction_source_extra(inc.amount, parts, inc.participant_amounts, inc_deds)
         for pid in non_me:
-            if (inc.id, pid) in inc_settled:
+            if (inc.id, pid, "i_owe") in inc_settled:
                 continue
             extra = {
                 "orig_amount": round(float(inc.amount or 0), 2),

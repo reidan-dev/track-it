@@ -33,11 +33,18 @@ class Income(Base):
 
 
 class IncomeParticipantSettlement(Base):
+    """A person can appear twice on the same income: as payable_from (they
+    owe the full amount, direction owed_to_me) AND as a participant (their
+    split share is owed back to them, direction i_owe). `direction`
+    disambiguates which of those two this settlement covers, so settling one
+    doesn't also settle the other.
+    """
     __tablename__ = "income_participant_settlements"
 
     id = Column(Integer, primary_key=True, index=True)
     income_id = Column(Integer, ForeignKey("incomes.id"), nullable=False)
     person_id = Column(Integer, nullable=False)
+    direction = Column(String, nullable=True)  # "owed_to_me" | "i_owe"
     month = Column(Integer, nullable=False)
     year = Column(Integer, nullable=False)
     period = Column(Integer, nullable=True)

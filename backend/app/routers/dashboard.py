@@ -324,13 +324,14 @@ def settle_up(
             exists = db.query(IncomeParticipantSettlement).filter(
                 IncomeParticipantSettlement.income_id == inc.id,
                 IncomeParticipantSettlement.person_id == item.person_id,
+                IncomeParticipantSettlement.direction == item.direction,
                 IncomeParticipantSettlement.month == req.month,
                 IncomeParticipantSettlement.year == req.year,
                 IncomeParticipantSettlement.period.is_(None),
             ).first()
             if not exists:
                 db.add(IncomeParticipantSettlement(
-                    income_id=inc.id, person_id=item.person_id,
+                    income_id=inc.id, person_id=item.person_id, direction=item.direction,
                     month=req.month, year=req.year, period=None))
             settled += 1
 
