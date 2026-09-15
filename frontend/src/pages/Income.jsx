@@ -22,7 +22,16 @@ const now = new Date()
 const EMPTY_FORM = {
   source: '', amount: '', date: now.toISOString().slice(0, 10), type: 'Salary', payable_from: null, due_date: '',
   earned_by: null, participants: [], participant_amounts: {},
-  is_recurring: false, end_month: '', end_year: '',
+  is_recurring: false, end_month: '', end_year: '', period: getBillingPeriod(now.getDate()),
+}
+
+function PeriodSelect({ value, onChange, className }) {
+  return (
+    <Select value={value} onChange={e => onChange(parseInt(e.target.value))} className={className}>
+      <option value={1}>1st–15th</option>
+      <option value={2}>16th–end</option>
+    </Select>
+  )
 }
 
 // A recurring template's "receipt" for the viewed month, if it's been marked received.
@@ -104,7 +113,7 @@ function RecurringIncomeRow({ entry, month, year, people, allDeductions, onEdit 
                 </button>
               </>
             ) : (
-              <Button size="sm" variant="outline" onClick={() => receiveMutation.mutate({})} disabled={receiveMutation.isPending}>
+              <Button size="sm" variant="outline" onClick={startEdit} disabled={receiveMutation.isPending}>
                 <Check className="w-3.5 h-3.5 mr-1" />Mark received
               </Button>
             )}
@@ -119,13 +128,10 @@ function RecurringIncomeRow({ entry, month, year, people, allDeductions, onEdit 
 
         {editingAmount && (
           <form onSubmit={confirmEdit} className="flex items-center gap-1.5 mt-2">
-            <Select value={period} onChange={e => setPeriod(parseInt(e.target.value))} className="h-8 text-xs w-28">
-              <option value={1}>1st–15th</option>
-              <option value={2}>16th–end</option>
-            </Select>
+            <PeriodSelect value={period} onChange={setPeriod} className="h-8 text-xs w-28" />
             <Input type="number" step="0.01" min="0" value={amountInput} onChange={e => setAmountInput(e.target.value)}
               className="h-8 text-xs w-28" autoFocus />
-            <Button size="sm" type="submit" disabled={receiveMutation.isPending}>Save</Button>
+            <Button size="sm" type="submit" disabled={receiveMutation.isPending}>{received ? 'Save' : 'Confirm received'}</Button>
             <Button size="sm" type="button" variant="outline" onClick={() => setEditingAmount(false)}>Cancel</Button>
           </form>
         )}
@@ -177,6 +183,7 @@ export default function Income() {
       source: e.source, amount: String(e.amount), date: e.date, type: e.type, payable_from: e.payable_from ?? null, due_date: e.due_date || '',
       earned_by: e.earned_by ?? null, participants: e.participants || [], participant_amounts: e.participant_amounts || {},
       is_recurring: !!e.is_recurring, end_month: e.end_month ?? '', end_year: e.end_year ?? '',
+      period: e.period || 1,
     })
     setEditingId(e.id)
     setShowForm(true)
@@ -191,11 +198,12 @@ export default function Income() {
     let payload
     if (form.is_recurring) {
       // A template has no single transaction date — pin it to the currently
-      // viewed period; actual occurrences are recorded via receipts instead.
-      payload = { ...rest, ...commonEnd, due_date: null, date: `${year}-${String(month).padStart(2, '0')}-01`, period: 1, month, year, start_month: month, start_year: year }
+      // viewed period; actual occurrences (and their own period) are recorded
+      // via receipts instead. This just seeds the receive form's default.
+      payload = { ...rest, ...commonEnd, due_date: null, date: `${year}-${String(month).padStart(2, '0')}-01`, month, year, start_month: month, start_year: year }
     } else {
       const d = new Date(form.date)
-      payload = { ...rest, ...commonEnd, due_date: form.due_date || null, period: getBillingPeriod(d.getDate()), month: d.getMonth() + 1, year: d.getFullYear() }
+      payload = { ...rest, ...commonEnd, due_date: form.due_date || null, month: d.getMonth() + 1, year: d.getFullYear() }
     }
     if (editingId) editMutation.mutate({ id: editingId, data: payload })
     else addMutation.mutate(payload)
@@ -346,6 +354,11 @@ export default function Income() {
           ) : (
             <div className="space-y-1.5"><Label>Transaction date</Label><Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
           )}
+
+          <div className="space-y-1.5">
+            <Label>Period <span className="text-muted-foreground text-xs">{form.is_recurring ? '(default for the receive form — editable per month)' : '(which half of the month this counts toward, and its split/deduction)'}</span></Label>
+            <PeriodSelect value={form.period} onChange={v => setForm(f => ({ ...f, period: v }))} />
+          </div>
 
           <div className="space-y-1.5"><Label>Type</Label><Select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>{INCOME_TYPES.map(t => <option key={t}>{t}</option>)}</Select></div>
           <div className="space-y-1.5"><Label>Payable from <span className="text-muted-foreground text-xs">(who pays you each occurrence — optional)</span></Label><PersonSelect value={form.payable_from} onChange={v => setForm(f => ({ ...f, payable_from: v }))} people={people} /></div>
