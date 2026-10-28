@@ -88,18 +88,13 @@ export default function Installments() {
   const { month: M, year: Y } = usePeriod()
   const allDeductions = useDeductions(M, Y)
 
-  const isPaidPeriod = (inst, period) =>
-    inst.payments?.some(p => p.month === M && p.year === Y && p.period === period)
+  // One installment can show as two cards (one per due day) when it's
+  // biweekly — both read/write the same shared terms_paid, just distinguished
+  // by `period` (1/2 for biweekly, null for a plain monthly card).
+  const isPaid = (inst, period) =>
+    inst.payments?.some(p => p.month === M && p.year === Y && (p.period ?? null) === (period ?? null))
 
-  const isPaidMonthly = (inst) =>
-    inst.payments?.some(p => p.month === M && p.year === Y && p.period == null)
-
-  const isFullyPaidThisMonth = (inst) =>
-    inst.frequency === 'biweekly'
-      ? isPaidPeriod(inst, 1) && isPaidPeriod(inst, 2)
-      : isPaidMonthly(inst)
-
-  const sortPaidLast = (arr) => [...arr].sort((a, b) => Number(isFullyPaidThisMonth(a)) - Number(isFullyPaidThisMonth(b)))
+  const sortPaidLast = (rows) => [...rows].sort((a, b) => Number(isPaid(a.inst, a.period)) - Number(isPaid(b.inst, b.period)))
 
   // Tri-state pay check (see Bills): empty → green → yellow → empty.
   const othersOf = (inst) => (inst.participants || []).filter(p => p !== ME_ID)
@@ -128,28 +123,32 @@ export default function Installments() {
     }
   }
 
-  // Paying a term and collecting shares are independent (advance-payment
-  // model): settling a share never flips the term's paid state.
-  const toggleShareInst = (inst, personId) => {
-    const wasSettled = settledPersonIds(inst, M, Y, null).has(personId)
-    settleMutation.mutate({ id: inst.id, personId, period: null, settled: wasSettled })
-  }
-  const periodOf = (inst) => inst.due_day ? getBillingPeriod(parseInt(String(inst.due_day).split(',')[0].trim())) : 1
-  const activeList = installments.filter(i => i.status === 'active')
+  const sectionOf = (dueDay) => dueDay ? getBillingPeriod(parseInt(String(dueDay).trim())) : 1
+  // A biweekly installment is one record but shows as two cards, one per due
+  // day, each reading/writing that day's own `period` on the shared record.
+  const cardRows = (list) => list.flatMap(inst => {
+    if (inst.frequency === 'biweekly') {
+      const [d1, d2] = String(inst.due_day || '').split(',').map(s => s.trim())
+      return [
+        { inst, period: 1, dueDay: d1 },
+        { inst, period: 2, dueDay: d2 },
+      ]
+    }
+    return [{ inst, period: null, dueDay: inst.due_day }]
+  })
+  // Mirrors backend active_installments(): don't show (or let it be paid) before its start month.
+  const started = (i) => i.start_year * 100 + i.start_month <= Y * 100 + M
+  const activeList = installments.filter(i => i.status === 'active' && started(i))
   const completed = installments.filter(i => i.status === 'completed')
-  const p1 = sortPaidLast(activeList.filter(i => periodOf(i) === 1))
-  const p2 = sortPaidLast(activeList.filter(i => periodOf(i) === 2))
+  const activeRows = cardRows(activeList)
+  const p1 = sortPaidLast(activeRows.filter(r => sectionOf(r.dueDay) === 1))
+  const p2 = sortPaidLast(activeRows.filter(r => sectionOf(r.dueDay) === 2))
 
   const newInstRow = (data) => ({ id: tempId(), payments: [], settlements: [], participants: [], participant_amounts: {}, status: 'active', terms_paid: 0, ...data })
 
   const addMutation = useOptimistic(qc, ['installments'], {
     mutationFn: createInstallment,
     apply: (list, data) => [...list, newInstRow(data)],
-    onSuccess: () => closeForm(),
-  })
-  const addBiweeklyMutation = useOptimistic(qc, ['installments'], {
-    mutationFn: ({ p1, p2 }) => Promise.all([createInstallment(p1), createInstallment(p2)]),
-    apply: (list, { p1, p2 }) => [...list, newInstRow(p1), newInstRow(p2)],
     onSuccess: () => closeForm(),
   })
   const editMutation = useOptimistic(qc, ['installments'], {
@@ -237,26 +236,31 @@ export default function Installments() {
       terms_paid: parseInt(form.terms_paid) || 0,
     }
     if (editingId) {
-      editMutation.mutate({ id: editingId, data: { ...base, due_day: form.due_day || null } })
+      const due_day = form.frequency === 'biweekly' ? `${due_day_1}, ${due_day_2}` : (form.due_day || null)
+      editMutation.mutate({ id: editingId, data: { ...base, due_day } })
       return
     }
-    // Biweekly creates two independent monthly installments, one per period.
+    // Biweekly is one record paid twice a month — shown as two cards, one per
+    // due day, sharing total_terms/terms_paid (see cardRows).
     if (form.frequency === 'biweekly') {
-      const mk = (day) => ({ ...base, frequency: 'monthly', due_day: day ? String(day).trim() : null })
-      addBiweeklyMutation.mutate({ p1: mk(due_day_1), p2: mk(due_day_2) })
+      addMutation.mutate({ ...base, frequency: 'biweekly', due_day: `${due_day_1}, ${due_day_2}` })
       return
     }
     addMutation.mutate({ ...base, frequency: 'monthly', due_day: form.due_day || null })
   }
 
-  const perMonth = (i) => remainingAmount(i.installment_amount, deductionsFor(allDeductions, 'installment', i.id)) * (i.frequency === 'biweekly' ? 2 : 1)
-  const paidThisMonth = activeList.filter(isFullyPaidThisMonth).reduce((s, i) => s + perMonth(i), 0)
-  const unpaidThisMonth = activeList.filter(i => !isFullyPaidThisMonth(i)).reduce((s, i) => s + perMonth(i), 0)
+  const rowAmount = (row) => remainingAmount(row.inst.installment_amount,
+    deductionsFor(allDeductions, 'installment', row.inst.id).filter(d => (d.period ?? null) === (row.period ?? null)))
+  const paidThisMonth = activeRows.filter(r => isPaid(r.inst, r.period)).reduce((s, r) => s + rowAmount(r), 0)
+  const unpaidThisMonth = activeRows.filter(r => !isPaid(r.inst, r.period)).reduce((s, r) => s + rowAmount(r), 0)
 
-  const InstallmentCard = ({ inst, open, onToggleOpen }) => {
+  // `period`/`dueDay` are omitted for a completed item (nothing left to pay,
+  // so there's nothing period-specific left to show) — otherwise each card is
+  // one due day of `inst`, possibly sharing a record with a sibling card.
+  const InstallmentCard = ({ inst, period, dueDay, open, onToggleOpen }) => {
     const biweekly = inst.frequency === 'biweekly'
-    const fullyPaid = isFullyPaidThisMonth(inst)
     const completed = inst.status === 'completed'
+    const paid = !completed && isPaid(inst, period)
     const totalAmount = inst.total_amount ?? (inst.total_terms * parseFloat(inst.installment_amount))
     const remaining = (inst.total_terms - inst.terms_paid) * parseFloat(inst.installment_amount)
     const parts = inst.participants || []
@@ -264,44 +268,34 @@ export default function Installments() {
     const involved = involvedPeople(inst)
     const own = ownershipOf(inst, people)
     const deductions = deductionsFor(allDeductions, 'installment', inst.id)
+      .filter(d => completed || (d.period ?? null) === (period ?? null))
     const remainingTerm = remainingAmount(inst.installment_amount, deductions)
-    const paidPeriods = biweekly
-      ? [1, 2].filter(per => isPaidPeriod(inst, per))
-      : (fullyPaid ? [null] : [])
+    const paidPeriods = paid ? [period] : []
     const awaiting = own?.tier === 'owner' || completed ? 0 : awaitingAmount(inst, inst.installment_amount, M, Y, paidPeriods, deductions)
     const avatarProps = {
       ids: involved.ids, people, roles: involved.roles, title: 'Involved',
-      ...(hasSplit && !biweekly && !completed ? { settleableIds: parts, settledIds: [...settledPersonIds(inst, M, Y, null)], onToggleSettled: (pid) => toggleShareInst(inst, pid) } : {}),
+      ...(hasSplit && !completed ? {
+        settleableIds: parts, settledIds: [...settledPersonIds(inst, M, Y, period)],
+        onToggleSettled: (pid) => settleMutation.mutate({ id: inst.id, personId: pid, period, settled: settledPersonIds(inst, M, Y, period).has(pid) }),
+      } : {}),
     }
-    const statusLabel = completed ? 'Done' : fullyPaid ? 'Paid' : biweekly ? `${[1,2].filter(p=>isPaidPeriod(inst,p)).length}/2 paid` : 'Unpaid'
+    const statusLabel = completed ? 'Done' : paid ? 'Paid' : 'Unpaid'
+    const shownDueDay = dueDay ?? inst.due_day
 
     return (
       <Card className="relative overflow-hidden">
         <OwnershipStripe ownership={own} />
         <div className="px-3 py-2.5 pl-4">
           <div className="flex items-center gap-3">
-            {/* Pay toggle(s) */}
+            {/* Pay toggle */}
             {completed ? (
               <CheckCircle className="w-5 h-5 text-green-500 shrink-0" />
-            ) : biweekly ? (
-              <div className="flex gap-1.5 shrink-0">
-                {[1, 2].map(p => {
-                  const pPaid = isPaidPeriod(inst, p)
-                  return (
-                    <div key={p} className="flex flex-col items-center gap-0.5">
-                      <TriCheck state={instState(inst, pPaid, p)} hasOthers={othersOf(inst).length > 0}
-                        onCycle={() => cycleInst(inst, pPaid, p)} />
-                      <span className="text-[10px] text-muted-foreground">{p === 1 ? '1–15' : '16+'}</span>
-                    </div>
-                  )
-                })}
-              </div>
             ) : (
               <TriCheck
                 className="shrink-0"
-                state={instState(inst, fullyPaid, null)}
+                state={instState(inst, paid, period)}
                 hasOthers={othersOf(inst).length > 0}
-                onCycle={() => cycleInst(inst, fullyPaid, null)}
+                onCycle={() => cycleInst(inst, paid, period)}
               />
             )}
 
@@ -312,7 +306,11 @@ export default function Installments() {
                 <OwnerChip ownership={own} />
                 {involved.ids.length > 0 && <PersonAvatars {...avatarProps} />}
                 {hasSplit && <Users className="w-3 h-3 text-muted-foreground shrink-0" />}
-                {biweekly && <Badge variant="warning" className="text-[10px]">biweekly</Badge>}
+                {biweekly && (
+                  <Badge variant="warning" className="text-[10px]">
+                    biweekly{period != null ? ` · ${period === 1 ? '1–15' : '16+'}` : ''}
+                  </Badge>
+                )}
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <p className="text-xs text-muted-foreground truncate">
@@ -345,10 +343,10 @@ export default function Installments() {
               {inst.loaned_amount != null && (
                 <span>Loaned <span className="text-foreground font-medium">{formatCurrency(inst.loaned_amount)}</span></span>
               )}
-              {inst.due_day && (
-                <span>due {biweekly ? String(inst.due_day) : `${inst.due_day}${ordinal(inst.due_day)}`}</span>
+              {shownDueDay && (
+                <span>due {period == null && biweekly ? String(shownDueDay) : `${shownDueDay}${ordinal(shownDueDay)}`}</span>
               )}
-              <Badge variant={completed || fullyPaid ? 'success' : 'warning'} className="text-[10px]">{statusLabel}</Badge>
+              <Badge variant={completed || paid ? 'success' : 'warning'} className="text-[10px]">{statusLabel}</Badge>
               {inst.payment_method && <PaymentMethodBadge value={inst.payment_method} />}
             </div>
             {inst.notes && <p className="text-xs text-muted-foreground">{inst.notes}</p>}
@@ -361,19 +359,19 @@ export default function Installments() {
                 people={people}
                 month={M}
                 year={Y}
+                period={period}
                 deductions={deductions}
               />
             )}
             <SplitTracker
               entry={inst}
+              period={period}
               amount={inst.installment_amount}
               people={people}
               month={M}
               year={Y}
               deductions={deductions}
-              onToggle={(personId, period, settled) => period == null
-                ? toggleShareInst(inst, personId)
-                : settleMutation.mutate({ id: inst.id, personId, period, settled })}
+              onToggle={(personId, _p, settled) => settleMutation.mutate({ id: inst.id, personId, period, settled })}
             />
             <div className="flex justify-end gap-1.5 pt-0.5">
               <button onClick={e => openEdit(e, inst)} className="flex items-center gap-1 text-xs px-2 py-1 text-muted-foreground hover:text-foreground rounded hover:bg-accent"><Pencil className="w-3.5 h-3.5" />Edit</button>
@@ -406,7 +404,8 @@ export default function Installments() {
       {p1.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">1st – 15th</h2>
-          {p1.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
+          {p1.map(r => <InstallmentCard key={`${r.inst.id}-${r.period ?? 'm'}`} inst={r.inst} period={r.period} dueDay={r.dueDay}
+            open={!!openIds[`${r.inst.id}-${r.period ?? 'm'}`]} onToggleOpen={() => toggleOpen(`${r.inst.id}-${r.period ?? 'm'}`)} />)}
         </div>
       )}
 
@@ -414,7 +413,8 @@ export default function Installments() {
       {p2.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">16th – end of month</h2>
-          {p2.map(i => <InstallmentCard key={i.id} inst={i} open={!!openIds[i.id]} onToggleOpen={() => toggleOpen(i.id)} />)}
+          {p2.map(r => <InstallmentCard key={`${r.inst.id}-${r.period ?? 'm'}`} inst={r.inst} period={r.period} dueDay={r.dueDay}
+            open={!!openIds[`${r.inst.id}-${r.period ?? 'm'}`]} onToggleOpen={() => toggleOpen(`${r.inst.id}-${r.period ?? 'm'}`)} />)}
         </div>
       )}
 
@@ -430,7 +430,7 @@ export default function Installments() {
         footer={
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={closeForm}>Cancel</Button>
-            <Button type="submit" form="installment-form" disabled={addMutation.isPending || editMutation.isPending || addBiweeklyMutation.isPending}>
+            <Button type="submit" form="installment-form" disabled={addMutation.isPending || editMutation.isPending}>
               {editingId ? 'Save changes' : 'Add'}
             </Button>
           </div>
@@ -470,10 +470,10 @@ export default function Installments() {
             <Label>Frequency</Label>
             <Select value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))} disabled={!!editingId}>
               <option value="monthly">Monthly (once/month)</option>
-              <option value="biweekly">Biweekly (creates 2 installments)</option>
+              <option value="biweekly">Biweekly (one loan, two due days)</option>
             </Select>
             {form.frequency === 'biweekly' && !editingId && (
-              <p className="text-xs text-muted-foreground">Creates two separate installments — one in each period — that you edit independently.</p>
+              <p className="text-xs text-muted-foreground">Shows as two cards, one per due day, but they're the same loan — Total Terms is the combined count across both.</p>
             )}
           </div>
 
@@ -493,11 +493,11 @@ export default function Installments() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>First due day <span className="text-muted-foreground text-xs">(1–15)</span></Label>
-                <Input type="number" min="1" max="15" value={form.due_day_1} onChange={e => setForm(f => ({ ...f, due_day_1: e.target.value }))} placeholder="e.g. 5" />
+                <Input type="number" min="1" max="15" value={form.due_day_1} onChange={e => setForm(f => ({ ...f, due_day_1: e.target.value }))} placeholder="e.g. 5" required />
               </div>
               <div className="space-y-1.5">
                 <Label>Second due day <span className="text-muted-foreground text-xs">(16–31)</span></Label>
-                <Input type="number" min="16" max="31" value={form.due_day_2} onChange={e => setForm(f => ({ ...f, due_day_2: e.target.value }))} placeholder="e.g. 20" />
+                <Input type="number" min="16" max="31" value={form.due_day_2} onChange={e => setForm(f => ({ ...f, due_day_2: e.target.value }))} placeholder="e.g. 20" required />
               </div>
             </div>
           ) : (

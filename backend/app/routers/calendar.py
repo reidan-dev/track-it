@@ -64,25 +64,30 @@ def get_calendar_events(
         Installment.status == "active",
         Installment.start_year * 100 + Installment.start_month <= year * 100 + month,
     ).all()
-    paid_inst_ids = {
-        ip.installment_id for ip in db.query(InstallmentPayment).filter(
-            InstallmentPayment.month == month, InstallmentPayment.year == year,
-            InstallmentPayment.installment_id.in_([i.id for i in installments]),
-        ).all()
-    }
+    inst_payments = db.query(InstallmentPayment).filter(
+        InstallmentPayment.month == month, InstallmentPayment.year == year,
+        InstallmentPayment.installment_id.in_([i.id for i in installments]),
+    ).all() if installments else []
+
+    def _inst_paid(iid, prd):
+        return any(ip.installment_id == iid and (prd is None or ip.period == prd) for ip in inst_payments)
+
     for inst in installments:
         owed, split = _owed_to_me(inst.installment_amount, inst.participants, inst.participant_amounts)
         days = [min(int(p.strip()), dim) for p in str(inst.due_day or "").split(",") if p.strip().isdigit()]
         if not days:
             days = [1]
-        for d in days:
+        # A biweekly installment is one record with two due days sharing
+        # terms_paid — each day's own payment is tagged period 1/2.
+        for idx, d in enumerate(days):
+            prd = (idx + 1) if inst.frequency == "biweekly" else None
             events.append({
                 "type": "installment",
                 "id": inst.id,
                 "name": inst.name,
                 "amount": float(inst.installment_amount),
                 "date": date(year, month, max(d, 1)).isoformat(),
-                "paid": inst.id in paid_inst_ids,
+                "paid": _inst_paid(inst.id, prd),
                 "owed_to_me": owed,
                 "split": split,
             })

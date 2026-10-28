@@ -120,7 +120,11 @@ def build_period_message(db, user, month, year, period):
             star = "*" if has_split(i.participants) else ""
             any_split = any_split or bool(star)
             total += float(i.installment_amount)
-            due = str(i.due_day) if i.due_day else "—"
+            if i.frequency == "biweekly" and i.due_day:
+                days = [d.strip() for d in str(i.due_day).split(",")]
+                due = days[period - 1] if len(days) == 2 else str(i.due_day)
+            else:
+                due = str(i.due_day) if i.due_day else "—"
             lines.append(f"• {i.name}{star} — {_fmt(i.installment_amount, user.currency)} (due {due})")
 
     lines.append("")

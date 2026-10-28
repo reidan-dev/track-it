@@ -78,6 +78,22 @@ def get_summary(
     def _remaining(item_type, item_id, amount):
         return effective_total(amount, item_deductions(deds, item_type, item_id))
 
+    def _installment_remaining(inst):
+        """A biweekly installment is due twice a month (two periods sharing
+        one record), so its monthly total is both periods' amounts net of
+        that period's own deductions, not one term's worth."""
+        if inst.frequency == "biweekly":
+            return sum(effective_total(inst.installment_amount, deds.get(("installment", inst.id, prd), []))
+                       for prd in (1, 2))
+        return _remaining("installment", inst.id, inst.installment_amount)
+
+    def _my_installment_remaining(inst):
+        if inst.frequency == "biweekly":
+            return sum(my_effective_share(inst.installment_amount, inst.participants, inst.participant_amounts,
+                                           deds.get(("installment", inst.id, prd), [])) for prd in (1, 2))
+        return my_effective_share(inst.installment_amount, inst.participants, inst.participant_amounts,
+                                   item_deductions(deds, "installment", inst.id))
+
     month_incomes = resolved_incomes(db, current_user, m, y)
     total_income = sum((i.amount for i in month_incomes), Decimal(0))
     income_given_away = sum(
@@ -104,7 +120,7 @@ def get_summary(
         Installment.user_id == current_user.id,
         Installment.status == "active",
     ).all()
-    total_installments = sum(_remaining("installment", i.id, i.installment_amount) for i in active_installments)
+    total_installments = sum(_installment_remaining(i) for i in active_installments)
 
     active_bills = db.query(Bill).filter(
         Bill.user_id == current_user.id,
@@ -137,19 +153,25 @@ def get_summary(
             })
 
     for inst in active_installments:
-        paid_this_month = db.query(InstallmentPayment).filter(
-            InstallmentPayment.installment_id == inst.id,
-            InstallmentPayment.month == m,
-            InstallmentPayment.year == y,
-        ).first()
-        if not paid_this_month:
-            upcoming.append({
-                "type": "installment",
-                "id": inst.id,
-                "name": inst.name,
-                "amount": _remaining("installment", inst.id, inst.installment_amount),
-                "due_date": date(y, m, 1).isoformat(),
-            })
+        periods = (1, 2) if inst.frequency == "biweekly" else (None,)
+        for prd in periods:
+            q = db.query(InstallmentPayment).filter(
+                InstallmentPayment.installment_id == inst.id,
+                InstallmentPayment.month == m,
+                InstallmentPayment.year == y,
+            )
+            q = q.filter(InstallmentPayment.period == prd) if prd is not None \
+                else q.filter(InstallmentPayment.period.is_(None))
+            if not q.first():
+                prd_deds = deds.get(("installment", inst.id, prd), []) if prd is not None \
+                    else item_deductions(deds, "installment", inst.id)
+                upcoming.append({
+                    "type": "installment",
+                    "id": inst.id,
+                    "name": inst.name,
+                    "amount": effective_total(inst.installment_amount, prd_deds),
+                    "due_date": date(y, m, 1).isoformat(),
+                })
 
     loans_nearing = []
     all_active_loans = db.query(Loan).filter(
@@ -176,11 +198,7 @@ def get_summary(
                            item_deductions(deds, "bill", b.id))
         for b in active_bills
     )
-    my_installments_total = sum(
-        my_effective_share(i.installment_amount, i.participants, i.participant_amounts,
-                           item_deductions(deds, "installment", i.id))
-        for i in active_installments
-    )
+    my_installments_total = sum(_my_installment_remaining(i) for i in active_installments)
 
     def _my_expense_cost(exp):
         e_deds = item_deductions(deds, "expense", exp.id)
@@ -392,7 +410,7 @@ def get_trends(
             Installment.start_year * 100 + Installment.start_month <= y * 100 + m,
         ).all()
         my_installments = sum(
-            _my_share(i.installment_amount, i.participants, i.participant_amounts)
+            _my_share(i.installment_amount, i.participants, i.participant_amounts) * (2 if i.frequency == "biweekly" else 1)
             for i in active_installments
         )
 

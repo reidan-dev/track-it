@@ -552,6 +552,9 @@ def _record_payment(db, user, kind, oid, year, month, viewp):
         q = q.filter(InstallmentPayment.period == period) if period is not None else q.filter(InstallmentPayment.period.is_(None))
         if not q.first():
             db.add(InstallmentPayment(installment_id=oid, month=month, year=year, period=period))
+            inst.terms_paid = (inst.terms_paid or 0) + 1
+            if inst.terms_paid >= inst.total_terms:
+                inst.status = "completed"
             db.commit()
         return f"✓ {inst.name} marked paid"
     return "Done"

@@ -27,12 +27,12 @@ function personEmoji(pid, people) {
  * in a split; green when that person has paid their share for the period.
  * Only renders when there's an actual split (more than one participant).
  */
-export function SplitTracker({ entry, amount, people, month, year, onToggle, deductions = [] }) {
+export function SplitTracker({ entry, amount, people, month, year, onToggle, deductions = [], period: forcedPeriod }) {
   const participants = entry.participants || []
   if (participants.length <= 1) return null
 
   const biweekly = entry.frequency === 'biweekly'
-  const periods = biweekly ? [1, 2] : [null]
+  const periods = forcedPeriod !== undefined ? [forcedPeriod] : (biweekly ? [1, 2] : [null])
   const settlements = entry.settlements || []
 
   const isSettled = (pid, period) =>
