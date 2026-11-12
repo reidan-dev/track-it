@@ -138,7 +138,7 @@ def get_share_link(
     db: Session = Depends(get_db),
 ):
     if not current_user.share_token:
-        current_user.share_token = secrets.token_urlsafe(24)
+        current_user.share_token = secrets.token_urlsafe(9)  # ~12 chars, still ~72 bits of entropy
         db.commit()
     return {"token": current_user.share_token}
 
