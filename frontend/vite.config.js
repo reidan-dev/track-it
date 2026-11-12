@@ -37,8 +37,12 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         // SPA fallback so deep links work offline; exclude API + auth paths.
+        // Also exclude /shared/* — it's a cold entry point opened by people who
+        // may not have this PWA's SW active/updated yet, so a stale cached shell
+        // here (pointing at JS chunks a newer deploy has deleted) would blank-page
+        // them with no way to recover. It doesn't need offline support anyway.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/auth/],
+        navigateFallbackDenylist: [/^\/api/, /^\/auth/, /^\/shared\//],
         // Never cache authed financial data — it lives on a separate origin and
         // must always come fresh. Be explicit anyway.
         runtimeCaching: [
