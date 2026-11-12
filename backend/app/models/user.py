@@ -13,9 +13,11 @@ class User(Base):
     currency = Column(String, default="PHP")
     theme = Column(String, default="system")
     palette = Column(String, default="blue")  # accent palette layered on light/dark
+    share_token = Column(String, nullable=True, index=True)  # public link for the shared tracker page
     created_at = Column(DateTime, default=datetime.utcnow)
 
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    shared_tracker_rows = relationship("SharedTrackerRow", back_populates="user", cascade="all, delete-orphan")
     expenses = relationship("Expense", back_populates="user", cascade="all, delete-orphan")
     installments = relationship("Installment", back_populates="user", cascade="all, delete-orphan")
     bills = relationship("Bill", back_populates="user", cascade="all, delete-orphan")

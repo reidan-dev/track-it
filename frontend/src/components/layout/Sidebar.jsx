@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, ClipboardList, Calendar, Receipt, FileText, CreditCard,
-  Landmark, TrendingUp, Settings, LogOut,
+  Landmark, TrendingUp, Settings, LogOut, Share2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
@@ -23,6 +23,7 @@ const groups = [
       { to: '/installments', icon: CreditCard, label: 'Installments' },
       { to: '/loans', icon: Landmark, label: 'Loans' },
       { to: '/income', icon: TrendingUp, label: 'Income' },
+      { to: '/shared-tracker', icon: Share2, label: 'Shared Tracker' },
     ],
   },
   {

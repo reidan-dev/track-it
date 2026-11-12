@@ -8,6 +8,7 @@ from app.models.person import Person
 from app.models.payment_method import PaymentMethod
 from app.models.telegram import TelegramConversation
 from app.models.deduction import Deduction
+from app.models.shared_tracker import SharedTrackerRow, SharedTrackerEntry
 
 __all__ = [
     "User", "UserSettings",
@@ -20,4 +21,5 @@ __all__ = [
     "Person",
     "PaymentMethod",
     "Deduction",
+    "SharedTrackerRow", "SharedTrackerEntry",
 ]

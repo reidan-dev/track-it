@@ -14,6 +14,8 @@ import Loans from '@/pages/Loans'
 import Income from '@/pages/Income'
 import CalendarPage from '@/pages/Calendar'
 import Settings from '@/pages/Settings'
+import SharedTracker from '@/pages/SharedTracker'
+import PublicSharedTracker from '@/pages/PublicSharedTracker'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth()
@@ -26,6 +28,7 @@ function AppRoutes() {
     <LockGate active={isAuthenticated}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/shared/:token" element={<PublicSharedTracker />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="/summary" element={<ProtectedRoute><Summary /></ProtectedRoute>} />
         <Route path="/expenses" element={<ProtectedRoute><Expenses /></ProtectedRoute>} />
@@ -35,6 +38,7 @@ function AppRoutes() {
         <Route path="/income" element={<ProtectedRoute><Income /></ProtectedRoute>} />
         <Route path="/calendar" element={<ProtectedRoute><CalendarPage /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/shared-tracker" element={<ProtectedRoute><SharedTracker /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </LockGate>

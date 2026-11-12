@@ -4,7 +4,7 @@ import { BottomNav } from './BottomNav'
 import { MonthNavigator } from './MonthNavigator'
 
 // Pages whose data is scoped to the viewed month.
-const MONTH_AWARE = ['/expenses', '/bills', '/installments', '/income', '/summary', '/calendar']
+const MONTH_AWARE = ['/expenses', '/bills', '/installments', '/income', '/summary', '/calendar', '/shared-tracker']
 
 export default function Layout({ children }) {
   const { pathname } = useLocation()

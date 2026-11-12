@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Receipt, Calendar, MoreHorizontal, Plus,
-  ClipboardList, FileText, CreditCard, Landmark, TrendingUp, Settings, LogOut, X,
+  ClipboardList, FileText, CreditCard, Landmark, TrendingUp, Settings, LogOut, X, Share2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
@@ -22,6 +22,7 @@ const moreLinks = [
   { to: '/installments', icon: CreditCard, label: 'Installments' },
   { to: '/loans', icon: Landmark, label: 'Loans' },
   { to: '/income', icon: TrendingUp, label: 'Income' },
+  { to: '/shared-tracker', icon: Share2, label: 'Shared Tracker' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 
