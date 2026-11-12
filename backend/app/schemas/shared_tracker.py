@@ -15,6 +15,7 @@ class SharedTrackerEntryUpdate(BaseModel):
     amount: Optional[Decimal] = None
     state: Optional[str] = None
     notes: Optional[str] = None
+    held_by: Optional[int] = None
 
 
 class SharedTrackerEntryOut(BaseModel):
@@ -25,6 +26,7 @@ class SharedTrackerEntryOut(BaseModel):
     amount: Optional[Decimal] = None
     state: str
     notes: Optional[str] = None
+    held_by: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -34,6 +36,16 @@ class SharedTrackerRowOut(BaseModel):
     id: int
     label: str
     entry: SharedTrackerEntryOut
+
+
+class HolderOut(BaseModel):
+    id: int
+    name: str
+
+
+class SharedTrackerPublicView(BaseModel):
+    rows: list[SharedTrackerRowOut]
+    holders: list[HolderOut]
 
 
 class ShareLinkOut(BaseModel):

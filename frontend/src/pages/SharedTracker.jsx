@@ -5,6 +5,7 @@ import {
   getSharedTracker, addSharedTrackerRow, renameSharedTrackerRow,
   deleteSharedTrackerRow, updateSharedTrackerEntry, getShareLink,
 } from '@/api/sharedTracker'
+import { getPeople } from '@/api/people'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Button } from '@/components/shared/Button'
 import { Input } from '@/components/shared/Input'
@@ -26,10 +27,11 @@ export default function SharedTracker() {
     queryKey,
     queryFn: () => getSharedTracker(MONTH, YEAR).then(r => r.data),
   })
+  const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
 
   const addMutation = useOptimistic(qc, queryKey, {
     mutationFn: (label) => addSharedTrackerRow(label),
-    apply: (rows, label) => [...rows, { id: `tmp-${Date.now()}`, label, entry: { id: `tmp-${Date.now()}`, amount: null, state: 'unpaid', notes: null } }],
+    apply: (rows, label) => [...rows, { id: `tmp-${Date.now()}`, label, entry: { id: `tmp-${Date.now()}`, amount: null, state: 'unpaid', notes: null, held_by: null } }],
     onSuccess: () => setNewLabel(''),
   })
   const renameMutation = useOptimistic(qc, queryKey, {
@@ -91,6 +93,7 @@ export default function SharedTracker() {
         <SharedTrackerTable
           rows={rows}
           isEditor
+          people={people}
           onRenameRow={(id, label) => renameMutation.mutate({ id, label })}
           onDeleteRow={(id) => deleteMutation.mutate(id)}
           onEntryChange={(entryId, data) => entryMutation.mutate({ entryId, data })}

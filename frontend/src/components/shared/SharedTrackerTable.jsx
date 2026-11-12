@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Badge } from '@/components/shared/Badge'
-import { Input, Textarea } from '@/components/shared/Input'
+import { Input, Textarea, Select } from '@/components/shared/Input'
 import { cn } from '@/lib/utils'
 
-function Row({ row, isEditor, onLabelChange, onDelete, onEntryChange }) {
+function Row({ row, isEditor, holderOptions, onLabelChange, onDelete, onEntryChange }) {
   const [label, setLabel] = useState(row.label)
   const [amount, setAmount] = useState(row.entry.amount ?? '')
   const [notes, setNotes] = useState(row.entry.notes ?? '')
@@ -55,6 +55,15 @@ function Row({ row, isEditor, onLabelChange, onDelete, onEntryChange }) {
           </button>
         </div>
 
+        <Select
+          value={row.entry.held_by ?? ''}
+          onChange={e => onEntryChange({ held_by: e.target.value ? parseInt(e.target.value) : null })}
+          className="h-8 text-xs"
+        >
+          <option value="">Held by — none —</option>
+          {holderOptions.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+        </Select>
+
         <Textarea
           placeholder="Notes" rows={1} value={notes}
           onChange={e => setNotes(e.target.value)}
@@ -66,7 +75,9 @@ function Row({ row, isEditor, onLabelChange, onDelete, onEntryChange }) {
   )
 }
 
-export function SharedTrackerTable({ rows, isEditor, onRenameRow, onDeleteRow, onEntryChange }) {
+export function SharedTrackerTable({ rows, isEditor, people = [], holders = [], onRenameRow, onDeleteRow, onEntryChange }) {
+  const holderOptions = isEditor ? people.map(p => ({ id: p.id, name: p.nickname || p.name })) : holders
+
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No rows yet{isEditor ? ' — add one below.' : '.'}</p>
   }
@@ -77,6 +88,7 @@ export function SharedTrackerTable({ rows, isEditor, onRenameRow, onDeleteRow, o
           key={row.id}
           row={row}
           isEditor={isEditor}
+          holderOptions={holderOptions}
           onLabelChange={(label) => onRenameRow(row.id, label)}
           onDelete={() => onDeleteRow(row.id)}
           onEntryChange={(data) => onEntryChange(row.entry.id, data)}

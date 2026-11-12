@@ -26,5 +26,6 @@ class SharedTrackerEntry(Base):
     amount = Column(Numeric(12, 2), nullable=True)
     state = Column(String, default="unpaid")  # "paid" | "unpaid"
     notes = Column(Text, nullable=True)
+    held_by = Column(Integer, ForeignKey("people.id"), nullable=True)
 
     row = relationship("SharedTrackerRow", back_populates="entries")
