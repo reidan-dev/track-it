@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database import Base
@@ -10,6 +10,7 @@ class SharedTrackerRow(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     label = Column(String, nullable=False)
+    allowed_holders = Column(JSON, default=list)  # person ids the viewer may pick as Held By
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="shared_tracker_rows")

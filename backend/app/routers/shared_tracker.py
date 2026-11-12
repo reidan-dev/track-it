@@ -9,16 +9,25 @@ from app.models.person import Person
 from app.models.shared_tracker import SharedTrackerRow, SharedTrackerEntry
 from app.schemas.shared_tracker import (
     SharedTrackerRowCreate, SharedTrackerRowUpdate, SharedTrackerEntryUpdate,
-    SharedTrackerRowOut, SharedTrackerEntryOut, SharedTrackerPublicView, ShareLinkOut,
+    SharedTrackerRowOut, SharedTrackerEntryOut, ShareLinkOut,
 )
 
 router = APIRouter(prefix="/shared-tracker", tags=["shared-tracker"])
 public_router = APIRouter(prefix="/public/shared-tracker", tags=["shared-tracker"])
 
 
+def _resolve_holders(db: Session, user_id: int, ids: list[int]) -> list[dict]:
+    """allowed_holders ids resolved to display names, scoped to this user."""
+    if not ids:
+        return []
+    people = {p.id: p for p in db.query(Person).filter(Person.id.in_(ids), Person.user_id == user_id).all()}
+    return [{"id": pid, "name": people[pid].nickname or people[pid].name} for pid in ids if pid in people]
+
+
 def _month_view(db: Session, user_id: int, month: int, year: int) -> list[SharedTrackerRowOut]:
-    """Rows for this month, auto-creating entries (amount carried from the most
-    recent prior month, state reset to unpaid) wherever one doesn't exist yet."""
+    """Rows for this month, auto-creating entries (amount and held_by carried
+    from the most recent prior month, state reset to unpaid) wherever one
+    doesn't exist yet."""
     rows = db.query(SharedTrackerRow).filter(SharedTrackerRow.user_id == user_id).order_by(SharedTrackerRow.id).all()
     out = []
     for row in rows:
@@ -44,7 +53,11 @@ def _month_view(db: Session, user_id: int, month: int, year: int) -> list[Shared
             db.add(entry)
             db.commit()
             db.refresh(entry)
-        out.append(SharedTrackerRowOut(id=row.id, label=row.label, entry=entry))
+        allowed = row.allowed_holders or []
+        out.append(SharedTrackerRowOut(
+            id=row.id, label=row.label, allowed_holders=allowed,
+            holders=_resolve_holders(db, user_id, allowed), entry=entry,
+        ))
     return out
 
 
@@ -53,23 +66,6 @@ def _user_by_token(token: str, db: Session) -> User:
     if not user:
         raise HTTPException(status_code=404, detail="Shared tracker not found")
     return user
-
-
-def _holders_for_user(db: Session, user_id: int) -> list[dict]:
-    """People already assigned as Held By somewhere in this tracker — the only
-    ones exposed to the public link, not the full People book."""
-    holder_ids = (
-        db.query(SharedTrackerEntry.held_by)
-        .join(SharedTrackerRow)
-        .filter(SharedTrackerRow.user_id == user_id, SharedTrackerEntry.held_by.isnot(None))
-        .distinct()
-        .all()
-    )
-    ids = [h[0] for h in holder_ids]
-    if not ids:
-        return []
-    people = db.query(Person).filter(Person.id.in_(ids), Person.user_id == user_id).all()
-    return [{"id": p.id, "name": p.nickname or p.name} for p in people]
 
 
 def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, db: Session) -> SharedTrackerEntry:
@@ -83,8 +79,9 @@ def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, d
         raise HTTPException(status_code=404, detail="Entry not found")
     fields = data.model_dump(exclude_unset=True)
     if fields.get("held_by") is not None:
-        if not db.query(Person).filter(Person.id == fields["held_by"], Person.user_id == user_id).first():
-            raise HTTPException(status_code=400, detail="Invalid held_by")
+        row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).first()
+        if fields["held_by"] not in (row.allowed_holders or []):
+            raise HTTPException(status_code=400, detail="held_by must be one of the row's allowed holders")
     for field, value in fields.items():
         setattr(entry, field, value)
     db.commit()
@@ -110,15 +107,15 @@ def add_row(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    row = SharedTrackerRow(user_id=current_user.id, label=data.label)
+    row = SharedTrackerRow(user_id=current_user.id, label=data.label, allowed_holders=data.allowed_holders)
     db.add(row)
     db.commit()
     db.refresh(row)
-    return {"id": row.id, "label": row.label}
+    return {"id": row.id, "label": row.label, "allowed_holders": row.allowed_holders or []}
 
 
 @router.put("/rows/{row_id}")
-def rename_row(
+def update_row(
     row_id: int,
     data: SharedTrackerRowUpdate,
     current_user: User = Depends(get_current_user),
@@ -127,9 +124,10 @@ def rename_row(
     row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == row_id, SharedTrackerRow.user_id == current_user.id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
-    row.label = data.label
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
     db.commit()
-    return {"id": row.id, "label": row.label}
+    return {"id": row.id, "label": row.label, "allowed_holders": row.allowed_holders or []}
 
 
 @router.delete("/rows/{row_id}", status_code=204)
@@ -168,7 +166,7 @@ def get_share_link(
 
 # --- Viewer (public, no auth) ---
 
-@public_router.get("/{token}", response_model=SharedTrackerPublicView)
+@public_router.get("/{token}", response_model=list[SharedTrackerRowOut])
 def public_list_month(
     token: str,
     month: int,
@@ -176,10 +174,7 @@ def public_list_month(
     db: Session = Depends(get_db),
 ):
     user = _user_by_token(token, db)
-    return {
-        "rows": _month_view(db, user.id, month, year),
-        "holders": _holders_for_user(db, user.id),
-    }
+    return _month_view(db, user.id, month, year)
 
 
 @public_router.patch("/{token}/entries/{entry_id}", response_model=SharedTrackerEntryOut)

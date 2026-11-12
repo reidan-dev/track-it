@@ -5,10 +5,12 @@ from decimal import Decimal
 
 class SharedTrackerRowCreate(BaseModel):
     label: str
+    allowed_holders: list[int] = []
 
 
 class SharedTrackerRowUpdate(BaseModel):
-    label: str
+    label: Optional[str] = None
+    allowed_holders: Optional[list[int]] = None
 
 
 class SharedTrackerEntryUpdate(BaseModel):
@@ -32,20 +34,17 @@ class SharedTrackerEntryOut(BaseModel):
         from_attributes = True
 
 
-class SharedTrackerRowOut(BaseModel):
-    id: int
-    label: str
-    entry: SharedTrackerEntryOut
-
-
 class HolderOut(BaseModel):
     id: int
     name: str
 
 
-class SharedTrackerPublicView(BaseModel):
-    rows: list[SharedTrackerRowOut]
-    holders: list[HolderOut]
+class SharedTrackerRowOut(BaseModel):
+    id: int
+    label: str
+    allowed_holders: list[int] = []
+    holders: list[HolderOut] = []  # allowed_holders resolved to display names
+    entry: SharedTrackerEntryOut
 
 
 class ShareLinkOut(BaseModel):

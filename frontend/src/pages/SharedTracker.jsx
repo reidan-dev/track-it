@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Share2, Copy, Check } from 'lucide-react'
 import {
-  getSharedTracker, addSharedTrackerRow, renameSharedTrackerRow,
+  getSharedTracker, addSharedTrackerRow, updateSharedTrackerRow,
   deleteSharedTrackerRow, updateSharedTrackerEntry, getShareLink,
 } from '@/api/sharedTracker'
 import { getPeople } from '@/api/people'
@@ -31,12 +31,15 @@ export default function SharedTracker() {
 
   const addMutation = useOptimistic(qc, queryKey, {
     mutationFn: (label) => addSharedTrackerRow(label),
-    apply: (rows, label) => [...rows, { id: `tmp-${Date.now()}`, label, entry: { id: `tmp-${Date.now()}`, amount: null, state: 'unpaid', notes: null, held_by: null } }],
+    apply: (rows, label) => [...rows, {
+      id: `tmp-${Date.now()}`, label, allowed_holders: [], holders: [],
+      entry: { id: `tmp-${Date.now()}`, amount: null, state: 'unpaid', notes: null, held_by: null },
+    }],
     onSuccess: () => setNewLabel(''),
   })
-  const renameMutation = useOptimistic(qc, queryKey, {
-    mutationFn: ({ id, label }) => renameSharedTrackerRow(id, label),
-    apply: (rows, { id, label }) => rows.map(r => (r.id === id ? { ...r, label } : r)),
+  const rowMutation = useOptimistic(qc, queryKey, {
+    mutationFn: ({ id, data }) => updateSharedTrackerRow(id, data),
+    apply: (rows, { id, data }) => rows.map(r => (r.id === id ? { ...r, ...data } : r)),
   })
   const deleteMutation = useOptimistic(qc, queryKey, {
     mutationFn: (id) => deleteSharedTrackerRow(id),
@@ -94,8 +97,9 @@ export default function SharedTracker() {
           rows={rows}
           isEditor
           people={people}
-          onRenameRow={(id, label) => renameMutation.mutate({ id, label })}
+          onRenameRow={(id, label) => rowMutation.mutate({ id, data: { label } })}
           onDeleteRow={(id) => deleteMutation.mutate(id)}
+          onAllowedHoldersChange={(id, allowed_holders) => rowMutation.mutate({ id, data: { allowed_holders } })}
           onEntryChange={(entryId, data) => entryMutation.mutate({ entryId, data })}
         />
       )}

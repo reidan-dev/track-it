@@ -5,7 +5,9 @@ import { Badge } from '@/components/shared/Badge'
 import { Input, Textarea, Select } from '@/components/shared/Input'
 import { cn } from '@/lib/utils'
 
-function Row({ row, isEditor, holderOptions, onLabelChange, onDelete, onEntryChange }) {
+const toggleId = (ids, id) => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+
+function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersChange, onEntryChange }) {
   const [label, setLabel] = useState(row.label)
   const [amount, setAmount] = useState(row.entry.amount ?? '')
   const [notes, setNotes] = useState(row.entry.notes ?? '')
@@ -55,13 +57,37 @@ function Row({ row, isEditor, holderOptions, onLabelChange, onDelete, onEntryCha
           </button>
         </div>
 
+        {isEditor && (
+          <div className="space-y-1">
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Who can hold this</p>
+            <div className="flex flex-wrap gap-1.5">
+              {people.map(p => {
+                const name = p.nickname || p.name
+                const active = row.allowed_holders.includes(p.id)
+                return (
+                  <button key={p.id} type="button"
+                    onClick={() => onAllowedHoldersChange(toggleId(row.allowed_holders, p.id))}
+                    className={cn(
+                      'px-2 py-0.5 rounded-full text-xs border transition-colors',
+                      active ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'
+                    )}
+                  >
+                    {name}
+                  </button>
+                )
+              })}
+              {people.length === 0 && <p className="text-xs text-muted-foreground">Add people in the People page first.</p>}
+            </div>
+          </div>
+        )}
+
         <Select
           value={row.entry.held_by ?? ''}
           onChange={e => onEntryChange({ held_by: e.target.value ? parseInt(e.target.value) : null })}
           className="h-8 text-xs"
         >
           <option value="">Held by — none —</option>
-          {holderOptions.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+          {row.holders.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
         </Select>
 
         <Textarea
@@ -75,9 +101,7 @@ function Row({ row, isEditor, holderOptions, onLabelChange, onDelete, onEntryCha
   )
 }
 
-export function SharedTrackerTable({ rows, isEditor, people = [], holders = [], onRenameRow, onDeleteRow, onEntryChange }) {
-  const holderOptions = isEditor ? people.map(p => ({ id: p.id, name: p.nickname || p.name })) : holders
-
+export function SharedTrackerTable({ rows, isEditor, people = [], onRenameRow, onDeleteRow, onAllowedHoldersChange, onEntryChange }) {
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No rows yet{isEditor ? ' — add one below.' : '.'}</p>
   }
@@ -88,9 +112,10 @@ export function SharedTrackerTable({ rows, isEditor, people = [], holders = [], 
           key={row.id}
           row={row}
           isEditor={isEditor}
-          holderOptions={holderOptions}
+          people={people}
           onLabelChange={(label) => onRenameRow(row.id, label)}
           onDelete={() => onDeleteRow(row.id)}
+          onAllowedHoldersChange={(ids) => onAllowedHoldersChange(row.id, ids)}
           onEntryChange={(data) => onEntryChange(row.entry.id, data)}
         />
       ))}
