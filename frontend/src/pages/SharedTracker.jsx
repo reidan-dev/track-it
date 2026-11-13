@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Share2, Copy, Check } from 'lucide-react'
+import { Plus, Share2, Copy, Check, Eye, Bell } from 'lucide-react'
 import {
   getSharedTracker, addSharedTrackerRow, updateSharedTrackerRow,
   deleteSharedTrackerRow, updateSharedTrackerEntry, getShareLink,
@@ -22,12 +22,44 @@ export default function SharedTracker() {
   const [newLabel, setNewLabel] = useState('')
   const [shareLink, setShareLink] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [showPreview, setShowPreview] = useState(false)
+  const [banner, setBanner] = useState(null)
+  const prevRowsRef = useRef(null)
+  const prevKeyRef = useRef(null)
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey,
     queryFn: () => getSharedTracker(MONTH, YEAR).then(r => r.data),
+    refetchInterval: 15000,
   })
   const { data: people = [] } = useQuery({ queryKey: ['people'], queryFn: () => getPeople().then(r => r.data) })
+
+  // Notice when a refetch brings in a change this tab didn't make itself
+  // (i.e. someone edited via the viewer link) — switching months also
+  // changes every entry, so skip the comparison right after that.
+  useEffect(() => {
+    const key = `${MONTH}-${YEAR}`
+    const prev = prevRowsRef.current
+    if (prevKeyRef.current === key && prev) {
+      for (const row of rows) {
+        const prevRow = prev.find(r => r.id === row.id)
+        if (!prevRow) continue
+        const a = prevRow.entry, b = row.entry
+        if (a.amount !== b.amount || a.state !== b.state || a.notes !== b.notes || a.held_by !== b.held_by) {
+          setBanner(`Viewer updated "${row.label}"`)
+          break
+        }
+      }
+    }
+    prevKeyRef.current = key
+    prevRowsRef.current = rows
+  }, [rows, MONTH, YEAR])
+
+  useEffect(() => {
+    if (!banner) return
+    const t = setTimeout(() => setBanner(null), 5000)
+    return () => clearTimeout(t)
+  }, [banner])
 
   const addMutation = useOptimistic(qc, queryKey, {
     mutationFn: (label) => addSharedTrackerRow(label),
@@ -74,10 +106,24 @@ export default function SharedTracker() {
           Shared Tracker
           <HelpTip text="A list anyone with the link can view and update — amounts, Paid/Unpaid, and notes. Only you can add or remove rows here." />
         </h1>
-        <Button variant="outline" onClick={handleShare}>
-          <Share2 className="w-4 h-4 mr-2" />Share
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowPreview(v => !v)}>
+            <Eye className="w-4 h-4 mr-2" />{showPreview ? 'Hide' : 'Preview'}
+          </Button>
+          <Button variant="outline" onClick={handleShare}>
+            <Share2 className="w-4 h-4 mr-2" />Share
+          </Button>
+        </div>
       </div>
+
+      {banner && (
+        <Card className="border-primary/40 bg-primary/5">
+          <CardContent className="py-2.5 flex items-center gap-2 text-sm">
+            <Bell className="w-4 h-4 text-primary shrink-0" />
+            {banner}
+          </CardContent>
+        </Card>
+      )}
 
       {shareLink && (
         <Card>
@@ -91,6 +137,15 @@ export default function SharedTracker() {
       )}
 
       {isLoading && <Card><CardContent className="py-2"><SkeletonList rows={3} /></CardContent></Card>}
+
+      {showPreview && !isLoading && (
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">What viewers see</p>
+          <div className="pointer-events-none opacity-90">
+            <SharedTrackerTable rows={rows} isEditor={false} onEntryChange={() => {}} />
+          </div>
+        </div>
+      )}
 
       {!isLoading && (
         <SharedTrackerTable

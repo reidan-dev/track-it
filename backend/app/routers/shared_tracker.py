@@ -4,13 +4,14 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, UserSettings
 from app.models.person import Person
 from app.models.shared_tracker import SharedTrackerRow, SharedTrackerEntry
 from app.schemas.shared_tracker import (
     SharedTrackerRowCreate, SharedTrackerRowUpdate, SharedTrackerEntryUpdate,
     SharedTrackerRowOut, SharedTrackerEntryOut, ShareLinkOut,
 )
+from app.scheduler import send_telegram, _fmt
 
 router = APIRouter(prefix="/shared-tracker", tags=["shared-tracker"])
 public_router = APIRouter(prefix="/public/shared-tracker", tags=["shared-tracker"])
@@ -66,6 +67,26 @@ def _user_by_token(token: str, db: Session) -> User:
     if not user:
         raise HTTPException(status_code=404, detail="Shared tracker not found")
     return user
+
+
+def _notify_viewer_change(db: Session, user: User, row: SharedTrackerRow, entry: SharedTrackerEntry, before: dict, fields: dict) -> None:
+    settings = db.query(UserSettings).filter(UserSettings.user_id == user.id).first()
+    if not (settings and settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id):
+        return
+    changes = []
+    if "amount" in fields:
+        changes.append(f"Amount: {_fmt(before['amount'], user.currency)} → {_fmt(entry.amount, user.currency)}")
+    if "state" in fields:
+        changes.append(f"Marked {entry.state.capitalize()}")
+    if "notes" in fields:
+        changes.append("Notes updated")
+    if "held_by" in fields:
+        holders = {h["id"]: h["name"] for h in _resolve_holders(db, user.id, row.allowed_holders or [])}
+        changes.append(f"Held by: {holders.get(entry.held_by, '— none —')}")
+    if not changes:
+        return
+    text = f"\U0001f4dd Viewer updated ‘{row.label}’\n" + "\n".join(changes)
+    send_telegram(settings.telegram_bot_token, settings.telegram_chat_id, text)
 
 
 def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, db: Session) -> SharedTrackerEntry:
@@ -185,4 +206,10 @@ def public_update_entry(
     db: Session = Depends(get_db),
 ):
     user = _user_by_token(token, db)
-    return _update_entry(entry_id, data, user.id, db)
+    fields = data.model_dump(exclude_unset=True)
+    before_entry = db.query(SharedTrackerEntry).filter(SharedTrackerEntry.id == entry_id).first()
+    before = {"amount": before_entry.amount} if before_entry else {}
+    entry = _update_entry(entry_id, data, user.id, db)
+    row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).first()
+    _notify_viewer_change(db, user, row, entry, before, fields)
+    return entry
