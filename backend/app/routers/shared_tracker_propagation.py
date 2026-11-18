@@ -1,7 +1,9 @@
 from datetime import date
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from app.models.income import Income
 from app.models.expense import Expense
+from app.models.bill import Bill, BillPayment
 from app.models.shared_tracker import SharedTrackerRow, SharedTrackerEntry
 
 
@@ -33,6 +35,37 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
         entry.linked_record_type = "expense"
         entry.linked_record_id = expense.id
         db.commit()
+    elif row.row_type == "bill":
+        if row.due_day is None:
+            raise HTTPException(status_code=400, detail="Set a due day before marking a bill row paid")
+        if row.linked_master_id is None:
+            bill = Bill(
+                user_id=user_id, name=row.label, due_day=row.due_day, category=row.label,
+                start_month=entry.month, start_year=entry.year,
+                participants=entry.participants or [0], participant_amounts=entry.participant_amounts or {},
+            )
+            db.add(bill)
+            db.commit()
+            db.refresh(bill)
+            row.linked_master_id = bill.id
+            db.commit()
+        payment = db.query(BillPayment).filter(
+            BillPayment.bill_id == row.linked_master_id,
+            BillPayment.month == entry.month,
+            BillPayment.year == entry.year,
+        ).first()
+        if payment:
+            payment.amount_paid = entry.amount
+        else:
+            payment = BillPayment(
+                bill_id=row.linked_master_id, month=entry.month, year=entry.year, amount_paid=entry.amount,
+            )
+            db.add(payment)
+        db.commit()
+        db.refresh(payment)
+        entry.linked_record_type = "bill_payment"
+        entry.linked_record_id = payment.id
+        db.commit()
 
 
 def reverse_paid(db: Session, row: SharedTrackerRow, entry: SharedTrackerEntry) -> None:
@@ -41,6 +74,8 @@ def reverse_paid(db: Session, row: SharedTrackerRow, entry: SharedTrackerEntry) 
         db.query(Income).filter(Income.id == entry.linked_record_id).delete()
     elif entry.linked_record_type == "expense":
         db.query(Expense).filter(Expense.id == entry.linked_record_id).delete()
+    elif entry.linked_record_type == "bill_payment":
+        db.query(BillPayment).filter(BillPayment.id == entry.linked_record_id).delete()
     entry.linked_record_type = None
     entry.linked_record_id = None
     db.commit()
@@ -61,4 +96,9 @@ def sync_paid(db: Session, entry: SharedTrackerEntry) -> None:
             expense.amount = entry.amount
             expense.participants = entry.participants or [0]
             expense.participant_amounts = entry.participant_amounts or {}
+            db.commit()
+    elif entry.linked_record_type == "bill_payment":
+        payment = db.query(BillPayment).filter(BillPayment.id == entry.linked_record_id).first()
+        if payment:
+            payment.amount_paid = entry.amount
             db.commit()
