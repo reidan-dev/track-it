@@ -12,6 +12,7 @@ from app.schemas.shared_tracker import (
     SharedTrackerRowOut, SharedTrackerEntryOut, ShareLinkOut,
 )
 from app.scheduler import send_telegram, _fmt
+from app.routers.shared_tracker_propagation import propagate_paid, reverse_paid, sync_paid
 
 router = APIRouter(prefix="/shared-tracker", tags=["shared-tracker"])
 public_router = APIRouter(prefix="/public/shared-tracker", tags=["shared-tracker"])
@@ -49,6 +50,8 @@ def _month_view(db: Session, user_id: int, month: int, year: int) -> list[Shared
                 row_id=row.id, month=month, year=year,
                 amount=prev.amount if prev else None,
                 held_by=prev.held_by if prev else None,
+                participants=prev.participants if prev else [],
+                participant_amounts=prev.participant_amounts if prev else {},
                 state="unpaid",
             )
             db.add(entry)
@@ -58,6 +61,8 @@ def _month_view(db: Session, user_id: int, month: int, year: int) -> list[Shared
         out.append(SharedTrackerRowOut(
             id=row.id, label=row.label, allowed_holders=allowed,
             holders=_resolve_holders(db, user_id, allowed), entry=entry,
+            row_type=row.row_type, due_day=row.due_day, total_terms=row.total_terms,
+            linked_master_id=row.linked_master_id,
         ))
     return out
 
@@ -98,14 +103,22 @@ def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, d
     )
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
+    row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).first()
     fields = data.model_dump(exclude_unset=True)
     if fields.get("held_by") is not None:
-        row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).first()
         if fields["held_by"] not in (row.allowed_holders or []):
             raise HTTPException(status_code=400, detail="held_by must be one of the row's allowed holders")
+    old_state = entry.state
     for field, value in fields.items():
         setattr(entry, field, value)
     db.commit()
+    db.refresh(entry)
+    if "state" in fields and old_state != "paid" and entry.state == "paid":
+        propagate_paid(db, user_id, row, entry)
+    elif "state" in fields and old_state == "paid" and entry.state != "paid":
+        reverse_paid(db, row, entry)
+    elif entry.state == "paid" and fields.keys() & {"amount", "participants", "participant_amounts"}:
+        sync_paid(db, entry)
     db.refresh(entry)
     return entry
 
@@ -128,11 +141,17 @@ def add_row(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    row = SharedTrackerRow(user_id=current_user.id, label=data.label, allowed_holders=data.allowed_holders)
+    row = SharedTrackerRow(
+        user_id=current_user.id, label=data.label, allowed_holders=data.allowed_holders,
+        row_type=data.row_type, due_day=data.due_day, total_terms=data.total_terms,
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
-    return {"id": row.id, "label": row.label, "allowed_holders": row.allowed_holders or []}
+    return {
+        "id": row.id, "label": row.label, "allowed_holders": row.allowed_holders or [],
+        "row_type": row.row_type, "due_day": row.due_day, "total_terms": row.total_terms,
+    }
 
 
 @router.put("/rows/{row_id}")
@@ -145,10 +164,20 @@ def update_row(
     row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == row_id, SharedTrackerRow.user_id == current_user.id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Row not found")
-    for field, value in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    if "row_type" in fields and fields["row_type"] != row.row_type:
+        has_history = row.linked_master_id is not None or db.query(SharedTrackerEntry).filter(
+            SharedTrackerEntry.row_id == row.id, SharedTrackerEntry.linked_record_id.isnot(None),
+        ).first() is not None
+        if has_history:
+            raise HTTPException(status_code=400, detail="Can't change type after this row has paid history")
+    for field, value in fields.items():
         setattr(row, field, value)
     db.commit()
-    return {"id": row.id, "label": row.label, "allowed_holders": row.allowed_holders or []}
+    return {
+        "id": row.id, "label": row.label, "allowed_holders": row.allowed_holders or [],
+        "row_type": row.row_type, "due_day": row.due_day, "total_terms": row.total_terms,
+    }
 
 
 @router.delete("/rows/{row_id}", status_code=204)
