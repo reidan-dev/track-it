@@ -46,6 +46,7 @@ B was picked because A would make the shared tracker behave differently from eve
 3. **Split method.** Confirmed: equal split by default, with the editor able to override individual people's amounts (same `participant_amounts` override convention the rest of the app uses).
 4. **Scope.** Confirmed: build the dropdown, distribute picker, and paid-propagation for all four types now, not income-only.
 5. **Settlement on Paid.** Confirmed: manual settlement, not auto-settle (Approach B above).
+6. **Viewer access.** Confirmed: the public share-link viewer (not just the logged-in editor) can trigger propagation — marking a typed row Paid from the public page creates the same real Income/Expense/Bill/Installment record it would if the owner did it. Both the authenticated `PATCH /entries/{id}` and the public `PATCH /{token}/entries/{id}` routes call the same `_update_entry`, so propagation lives there once and applies identically to both callers — no editor/viewer branch needed.
 
 ## How (left to the builder, decisions made where they affect behavior)
 
@@ -53,26 +54,28 @@ B was picked because A would make the shared tracker behave differently from eve
 
 `SharedTrackerRow` gains:
 - `row_type: str | None` — `"bill" | "expense" | "income" | "installment"`, nullable (existing rows have none until the editor sets one).
-- `participants: JSON list[int]`, default `[]` — person ids in the distribute set; `0` means "Me," matching the existing `participants: list[int]=[0]` convention used by Expense/Bill/Installment.
-- `participant_amounts: JSON dict`, default `{}` — optional per-person override; any participant missing from this dict falls back to an equal share, same fallback rule `_participant_share`/`effective_shares` already use elsewhere.
 - `due_day: int | None` — only used/required when `row_type == "bill"`.
 - `total_terms: int | None` — only used/required when `row_type == "installment"`.
-- `linked_master_id: int | None` — the created `Bill.id`/`Installment.id`, set the first time that row is ever marked Paid. Irrelevant for bill/income types.
+- `linked_master_id: int | None` — the created `Bill.id`/`Installment.id`, set the first time that row is ever marked Paid. Irrelevant for expense/income types.
 - Once `linked_master_id` is set (or any entry below has a `linked_record_id`), `row_type` becomes immutable — enforced in the row update endpoint (400 on attempted change).
 
 `SharedTrackerEntry` gains:
+- `participants: JSON list[int]`, default `[]` — person ids in that month's distribute set; `0` means "Me," matching the existing `participants: list[int]=[0]` convention used by Expense/Bill/Installment. **Scoped per month, not per row** — like `amount`/`held_by`, `_month_view` carries it over from the prior month as a starting point, but editing it only affects that month, so changing a split after the fact never rewrites a previously-paid month's real record.
+- `participant_amounts: JSON dict`, default `{}` — optional per-person override for that month; any participant missing from this dict falls back to an equal share, same fallback rule `_participant_share`/`effective_shares` already use elsewhere.
 - `linked_record_type: str | None` — mirrors the row's type at the time it was linked (`"income" | "expense" | "bill_payment" | "installment_payment"`).
 - `linked_record_id: int | None` — the created `Income.id`/`Expense.id`/`BillPayment.id`/`InstallmentPayment.id` for that month.
 
-One migration adds all of the above.
+One migration adds all of the above. Propagation only ever runs when `row_type` is set — a row with no type chosen yet behaves exactly as it does today when toggled Paid (no-op beyond the existing flag flip), so existing rows keep working unchanged until their editor opts them into a type.
 
 ### Propagation logic (in `shared_tracker.py`, where entry `state` is set)
 
 On transition to `"paid"`, per `row_type`:
-- **income** — create an `Income` row: `source=row.label`, `amount=entry.amount`, `date`/`month`/`year` from the entry, `type="other"`, `period="monthly"`, `participants=row.participants`, `participant_amounts=row.participant_amounts`. Store `linked_record_type/id` on the entry.
-- **expense** — create an `Expense` row: `category=row.label` (no separate category input — the label doubles as the category string, which is all `Expense.category` is), `amount`, `date`/`month`/`year`, `period="monthly"`, `participants`, `participant_amounts`. Store the link.
-- **bill** — if `row.linked_master_id` is unset, create the master `Bill` once (`name=row.label`, `category=row.label`, `due_day=row.due_day`, `start_month/year` = this entry's month/year, `participants`, `participant_amounts`) and store its id on the row. Either way, create/update that month's `BillPayment` (`bill_id=linked_master_id`, `month`, `year`, `amount_paid=entry.amount`) — same upsert-by-(bill_id, month, year, period) the existing `pay` endpoint already does. Store the link on the entry.
-- **installment** — if `row.linked_master_id` is unset, create the master `Installment` once (`name=row.label`, `installment_amount=entry.amount`, `total_terms=row.total_terms`, `start_month/year` = this entry's month/year, `participants`, `participant_amounts`) and store its id. Either way, create that term's `InstallmentPayment`, incrementing `terms_paid` and flipping `status` to `"completed"` at the threshold — identical to the existing `pay` endpoint's behavior (including its 400 on double-pay for the same period, which can't happen here since we gate on the entry's own state transition).
+- **income** — create an `Income` row: `source=row.label`, `amount=entry.amount`, `date`/`month`/`year` from the entry, `type="other"`, `period=1` (the model's `period` is an integer code, not a string — `1` matches the convention used elsewhere for a one-off/monthly cadence), `participants=entry.participants`, `participant_amounts=entry.participant_amounts`. Store `linked_record_type/id` on the entry.
+- **expense** — create an `Expense` row: `category=row.label` (no separate category input — the label doubles as the category string, which is all `Expense.category` is), `amount`, `date`/`month`/`year`, `period=1`, `participants`, `participant_amounts`. Store the link.
+- **bill** — if `row.linked_master_id` is unset, create the master `Bill` once (`name=row.label`, `category=row.label`, `due_day=row.due_day`, `start_month/year` = this entry's month/year, `participants=entry.participants`, `participant_amounts=entry.participant_amounts`) and store its id on the row. Either way, create/update that month's `BillPayment` (`bill_id=linked_master_id`, `month`, `year`, `amount_paid=entry.amount`) — same upsert-by-(bill_id, month, year, period) the existing `pay` endpoint already does. Store the link on the entry.
+- **installment** — if `row.linked_master_id` is unset, create the master `Installment` once (`name=row.label`, `installment_amount=entry.amount`, `total_terms=row.total_terms`, `start_month/year` = this entry's month/year, `participants=entry.participants`, `participant_amounts=entry.participant_amounts`) and store its id. Either way, create that term's `InstallmentPayment`, incrementing `terms_paid` and flipping `status` to `"completed"` at the threshold — identical to the existing `pay` endpoint's behavior (including its 400 on double-pay for the same period, which can't happen here since we gate on the entry's own state transition).
+
+Note: the master `Bill`/`Installment` is created once from whichever month's split happened to be set at that time; later months can still carry their own independent `participants`/`participant_amounts` on their own linked `BillPayment`/`InstallmentPayment`-triggering entry, but the master record's own fields (set at creation) aren't retroactively updated by later months' splits.
 
 On transition back to `"unpaid"`, reverse whichever of the above happened for that entry: delete the `Income`/`Expense` row, or delete that month's `BillPayment`, or delete that term's `InstallmentPayment` and decrement `terms_paid`/revert `status`. Clear `linked_record_type/id` on the entry. The master `Bill`/`Installment` row and `linked_master_id` are left in place (so the row stays locked to its type and the next Paid toggle reuses the same master).
 
