@@ -50,8 +50,8 @@ def _month_view(db: Session, user_id: int, month: int, year: int) -> list[Shared
                 row_id=row.id, month=month, year=year,
                 amount=prev.amount if prev else None,
                 held_by=prev.held_by if prev else None,
-                participants=prev.participants if prev else [],
-                participant_amounts=prev.participant_amounts if prev else {},
+                participants=(prev.participants or []) if prev else [],
+                participant_amounts=(prev.participant_amounts or {}) if prev else {},
                 state="unpaid",
             )
             db.add(entry)
@@ -94,31 +94,44 @@ def _notify_viewer_change(db: Session, user: User, row: SharedTrackerRow, entry:
     send_telegram(settings.telegram_bot_token, settings.telegram_chat_id, text)
 
 
-def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, db: Session) -> SharedTrackerEntry:
+def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, db: Session, allow_split: bool = True) -> SharedTrackerEntry:
     entry = (
         db.query(SharedTrackerEntry)
         .join(SharedTrackerRow)
         .filter(SharedTrackerEntry.id == entry_id, SharedTrackerRow.user_id == user_id)
+        .with_for_update()
         .first()
     )
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
-    row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).first()
+    row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).with_for_update().first()
     fields = data.model_dump(exclude_unset=True)
+    if not allow_split:
+        # The distribute-among split is editor-only; a public share-link viewer can
+        # trigger propagation (toggle Paid) but never rewrite who it's split between.
+        fields.pop("participants", None)
+        fields.pop("participant_amounts", None)
     if fields.get("held_by") is not None:
         if fields["held_by"] not in (row.allowed_holders or []):
             raise HTTPException(status_code=400, detail="held_by must be one of the row's allowed holders")
+    if fields.get("participants") is not None:
+        valid_ids = {0} | {p.id for p in db.query(Person).filter(Person.user_id == user_id).all()}
+        if not set(fields["participants"]).issubset(valid_ids):
+            raise HTTPException(status_code=400, detail="participants must be people on this account (or 0 for Me)")
     old_state = entry.state
     for field, value in fields.items():
         setattr(entry, field, value)
-    db.commit()
-    db.refresh(entry)
-    if "state" in fields and old_state != "paid" and entry.state == "paid":
-        propagate_paid(db, user_id, row, entry)
-    elif "state" in fields and old_state == "paid" and entry.state != "paid":
-        reverse_paid(db, row, entry)
-    elif entry.state == "paid" and fields.keys() & {"amount", "participants", "participant_amounts"}:
-        sync_paid(db, entry)
+    try:
+        if "state" in fields and old_state != "paid" and entry.state == "paid":
+            propagate_paid(db, user_id, row, entry)
+        elif "state" in fields and old_state == "paid" and entry.state != "paid":
+            reverse_paid(db, row, entry)
+        elif entry.state == "paid" and fields.keys() & {"amount", "participants", "participant_amounts"}:
+            sync_paid(db, entry)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(entry)
     return entry
 
@@ -238,7 +251,7 @@ def public_update_entry(
     fields = data.model_dump(exclude_unset=True)
     before_entry = db.query(SharedTrackerEntry).filter(SharedTrackerEntry.id == entry_id).first()
     before = {"amount": before_entry.amount} if before_entry else {}
-    entry = _update_entry(entry_id, data, user.id, db)
+    entry = _update_entry(entry_id, data, user.id, db, allow_split=False)
     row = db.query(SharedTrackerRow).filter(SharedTrackerRow.id == entry.row_id).first()
     _notify_viewer_change(db, user, row, entry, before, fields)
     return entry
