@@ -7,18 +7,25 @@ import { cn } from '@/lib/utils'
 
 const toggleId = (ids, id) => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
 
-function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersChange, onEntryChange }) {
+function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersChange, onRowChange, onEntryChange }) {
   const [label, setLabel] = useState(row.label)
   const [amount, setAmount] = useState(row.entry.amount ?? '')
   const [notes, setNotes] = useState(row.entry.notes ?? '')
+  const [dueDay, setDueDay] = useState(row.due_day ?? '')
+  const [totalTerms, setTotalTerms] = useState(row.total_terms ?? '')
 
   useEffect(() => { setLabel(row.label) }, [row.label])
   useEffect(() => {
     setAmount(row.entry.amount ?? '')
     setNotes(row.entry.notes ?? '')
   }, [row.entry.id, row.entry.amount, row.entry.notes])
+  useEffect(() => {
+    setDueDay(row.due_day ?? '')
+    setTotalTerms(row.total_terms ?? '')
+  }, [row.due_day, row.total_terms])
 
   const paid = row.entry.state === 'paid'
+  const typeLocked = row.linked_master_id != null || row.entry.linked_record_id != null
 
   return (
     <Card>
@@ -56,6 +63,41 @@ function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersC
             </Badge>
           </button>
         </div>
+
+        {isEditor && (
+          <div className="flex items-center gap-2">
+            <Select
+              value={row.row_type ?? ''}
+              disabled={typeLocked}
+              onChange={e => onRowChange({ row_type: e.target.value || null })}
+              className="h-8 text-xs flex-1"
+            >
+              <option value="">Type — none —</option>
+              <option value="bill">Bill</option>
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+              <option value="installment">Installment</option>
+            </Select>
+            {row.row_type === 'bill' && (
+              <Input
+                type="number" inputMode="numeric" placeholder="Due day"
+                value={dueDay}
+                onChange={e => setDueDay(e.target.value)}
+                onBlur={() => onRowChange({ due_day: dueDay === '' ? null : parseInt(dueDay) })}
+                className="h-8 text-xs w-24"
+              />
+            )}
+            {row.row_type === 'installment' && (
+              <Input
+                type="number" inputMode="numeric" placeholder="Number of terms"
+                value={totalTerms}
+                onChange={e => setTotalTerms(e.target.value)}
+                onBlur={() => onRowChange({ total_terms: totalTerms === '' ? null : parseInt(totalTerms) })}
+                className="h-8 text-xs w-28"
+              />
+            )}
+          </div>
+        )}
 
         {isEditor && (
           <div className="space-y-1">
@@ -101,7 +143,7 @@ function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersC
   )
 }
 
-export function SharedTrackerTable({ rows, isEditor, people = [], onRenameRow, onDeleteRow, onAllowedHoldersChange, onEntryChange }) {
+export function SharedTrackerTable({ rows, isEditor, people = [], onRenameRow, onDeleteRow, onAllowedHoldersChange, onRowChange, onEntryChange }) {
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">No rows yet{isEditor ? ' — add one below.' : '.'}</p>
   }
@@ -116,6 +158,7 @@ export function SharedTrackerTable({ rows, isEditor, people = [], onRenameRow, o
           onLabelChange={(label) => onRenameRow(row.id, label)}
           onDelete={() => onDeleteRow(row.id)}
           onAllowedHoldersChange={(ids) => onAllowedHoldersChange(row.id, ids)}
+          onRowChange={(data) => onRowChange(row.id, data)}
           onEntryChange={(data) => onEntryChange(row.entry.id, data)}
         />
       ))}

@@ -155,6 +155,7 @@ export default function SharedTracker() {
           onRenameRow={(id, label) => rowMutation.mutate({ id, data: { label } })}
           onDeleteRow={(id) => deleteMutation.mutate(id)}
           onAllowedHoldersChange={(id, allowed_holders) => rowMutation.mutate({ id, data: { allowed_holders } })}
+          onRowChange={(id, data) => rowMutation.mutate({ id, data })}
           onEntryChange={(entryId, data) => entryMutation.mutate({ entryId, data })}
         />
       )}
