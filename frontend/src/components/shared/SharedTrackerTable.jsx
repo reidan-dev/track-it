@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/shared/Card'
 import { Badge } from '@/components/shared/Badge'
 import { Input, Textarea, Select } from '@/components/shared/Input'
+import { ParticipantsEditor, ME_ID } from '@/components/shared/ParticipantsEditor'
 import { cn } from '@/lib/utils'
 
 const toggleId = (ids, id) => (ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
@@ -96,6 +97,20 @@ function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersC
                 className="h-8 text-xs w-28"
               />
             )}
+          </div>
+        )}
+
+        {isEditor && row.row_type && (
+          <div className="space-y-1">
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Distribute among</p>
+            <ParticipantsEditor
+              participants={row.entry.participants || []}
+              participantAmounts={row.entry.participant_amounts || {}}
+              onParticipantsChange={(participants) => onEntryChange({ participants })}
+              onAmountsChange={(participant_amounts) => onEntryChange({ participant_amounts })}
+              people={people}
+              totalAmount={row.entry.amount}
+            />
           </div>
         )}
 
