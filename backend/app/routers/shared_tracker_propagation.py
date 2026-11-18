@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models.income import Income
 from app.models.expense import Expense
 from app.models.bill import Bill, BillPayment
+from app.models.installment import Installment, InstallmentPayment
 from app.models.shared_tracker import SharedTrackerRow, SharedTrackerEntry
 
 
@@ -66,6 +67,31 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
         entry.linked_record_type = "bill_payment"
         entry.linked_record_id = payment.id
         db.commit()
+    elif row.row_type == "installment":
+        if row.total_terms is None:
+            raise HTTPException(status_code=400, detail="Set the number of terms before marking an installment row paid")
+        if row.linked_master_id is None:
+            inst = Installment(
+                user_id=user_id, name=row.label, installment_amount=entry.amount or 0,
+                total_terms=row.total_terms, start_month=entry.month, start_year=entry.year,
+                participants=entry.participants or [0], participant_amounts=entry.participant_amounts or {},
+            )
+            db.add(inst)
+            db.commit()
+            db.refresh(inst)
+            row.linked_master_id = inst.id
+            db.commit()
+        inst = db.query(Installment).filter(Installment.id == row.linked_master_id).first()
+        payment = InstallmentPayment(installment_id=row.linked_master_id, month=entry.month, year=entry.year)
+        db.add(payment)
+        inst.terms_paid += 1
+        if inst.terms_paid >= inst.total_terms:
+            inst.status = "completed"
+        db.commit()
+        db.refresh(payment)
+        entry.linked_record_type = "installment_payment"
+        entry.linked_record_id = payment.id
+        db.commit()
 
 
 def reverse_paid(db: Session, row: SharedTrackerRow, entry: SharedTrackerEntry) -> None:
@@ -76,6 +102,14 @@ def reverse_paid(db: Session, row: SharedTrackerRow, entry: SharedTrackerEntry) 
         db.query(Expense).filter(Expense.id == entry.linked_record_id).delete()
     elif entry.linked_record_type == "bill_payment":
         db.query(BillPayment).filter(BillPayment.id == entry.linked_record_id).delete()
+    elif entry.linked_record_type == "installment_payment":
+        payment = db.query(InstallmentPayment).filter(InstallmentPayment.id == entry.linked_record_id).first()
+        if payment:
+            inst = db.query(Installment).filter(Installment.id == payment.installment_id).first()
+            db.delete(payment)
+            inst.terms_paid = max(0, inst.terms_paid - 1)
+            if inst.status == "completed" and inst.terms_paid < inst.total_terms:
+                inst.status = "active"
     entry.linked_record_type = None
     entry.linked_record_id = None
     db.commit()
