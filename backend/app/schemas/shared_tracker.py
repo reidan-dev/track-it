@@ -24,6 +24,7 @@ class SharedTrackerEntryUpdate(BaseModel):
     state: Optional[str] = None
     notes: Optional[str] = None
     held_by: Optional[int] = None
+    period: Optional[Literal[1, 2]] = None
     participants: Optional[list[int]] = None
     participant_amounts: Optional[dict] = None
 
@@ -37,6 +38,7 @@ class SharedTrackerEntryOut(BaseModel):
     state: str
     notes: Optional[str] = None
     held_by: Optional[int] = None
+    period: Optional[int] = None
     participants: list[int] = []
     participant_amounts: dict = {}
     linked_record_type: Optional[str] = None

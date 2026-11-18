@@ -19,8 +19,8 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
     if row.row_type == "income":
         income = Income(
             user_id=user_id, source=row.label, amount=entry.amount,
-            date=date(entry.year, entry.month, 1), type="Other", period=1,
-            month=entry.month, year=entry.year,
+            date=date(entry.year, entry.month, 1), type="Other", period=entry.period or 1,
+            month=entry.month, year=entry.year, payable_from=entry.held_by,
             participants=entry.participants or [], participant_amounts=entry.participant_amounts or {},
         )
         db.add(income)
@@ -30,7 +30,7 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
     elif row.row_type == "expense":
         expense = Expense(
             user_id=user_id, name=row.label, amount=entry.amount, category=row.label,
-            date=date(entry.year, entry.month, 1), period=1,
+            date=date(entry.year, entry.month, 1), period=entry.period or 1,
             month=entry.month, year=entry.year,
             participants=entry.participants or [0], participant_amounts=entry.participant_amounts or {},
         )
@@ -45,6 +45,7 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
         if bill is None:
             bill = Bill(
                 user_id=user_id, name=row.label, due_day=row.due_day, category=row.label,
+                frequency="biweekly" if entry.period is not None else "monthly",
                 start_month=entry.month, start_year=entry.year,
                 participants=entry.participants or [0], participant_amounts=entry.participant_amounts or {},
             )
@@ -55,12 +56,14 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
             BillPayment.bill_id == row.linked_master_id,
             BillPayment.month == entry.month,
             BillPayment.year == entry.year,
+            BillPayment.period == entry.period,
         ).first()
         if payment:
             payment.amount_paid = entry.amount
         else:
             payment = BillPayment(
-                bill_id=row.linked_master_id, month=entry.month, year=entry.year, amount_paid=entry.amount,
+                bill_id=row.linked_master_id, month=entry.month, year=entry.year,
+                period=entry.period, amount_paid=entry.amount,
             )
             db.add(payment)
         db.flush()
@@ -73,13 +76,16 @@ def propagate_paid(db: Session, user_id: int, row: SharedTrackerRow, entry: Shar
         if inst is None:
             inst = Installment(
                 user_id=user_id, name=row.label, installment_amount=entry.amount or 0,
-                total_terms=row.total_terms, start_month=entry.month, start_year=entry.year,
+                total_terms=row.total_terms, frequency="biweekly" if entry.period is not None else "monthly",
+                start_month=entry.month, start_year=entry.year,
                 participants=entry.participants or [0], participant_amounts=entry.participant_amounts or {},
             )
             db.add(inst)
             db.flush()
             row.linked_master_id = inst.id
-        payment = InstallmentPayment(installment_id=row.linked_master_id, month=entry.month, year=entry.year)
+        payment = InstallmentPayment(
+            installment_id=row.linked_master_id, month=entry.month, year=entry.year, period=entry.period,
+        )
         db.add(payment)
         inst.terms_paid += 1
         if inst.terms_paid >= inst.total_terms:
@@ -128,16 +134,20 @@ def sync_paid(db: Session, entry: SharedTrackerEntry) -> None:
         income = db.query(Income).filter(Income.id == entry.linked_record_id).first()
         if income:
             income.amount = entry.amount
+            income.payable_from = entry.held_by
+            income.period = entry.period or 1
             income.participants = entry.participants or []
             income.participant_amounts = entry.participant_amounts or {}
     elif entry.linked_record_type == "expense":
         expense = db.query(Expense).filter(Expense.id == entry.linked_record_id).first()
         if expense:
             expense.amount = entry.amount
+            expense.period = entry.period or 1
             expense.participants = entry.participants or [0]
             expense.participant_amounts = entry.participant_amounts or {}
     elif entry.linked_record_type == "bill_payment":
         payment = db.query(BillPayment).filter(BillPayment.id == entry.linked_record_id).first()
         if payment:
             payment.amount_paid = entry.amount
+            payment.period = entry.period
     db.flush()

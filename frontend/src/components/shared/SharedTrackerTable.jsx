@@ -97,6 +97,17 @@ function Row({ row, isEditor, people, onLabelChange, onDelete, onAllowedHoldersC
                 className="h-8 text-xs w-28"
               />
             )}
+            {row.row_type && (
+              <Select
+                value={row.entry.period ?? ''}
+                onChange={e => onEntryChange({ period: e.target.value ? parseInt(e.target.value) : null })}
+                className="h-8 text-xs w-32"
+              >
+                <option value="">Whole month</option>
+                <option value="1">1st-15</option>
+                <option value="2">16th-End</option>
+              </Select>
+            )}
           </div>
         )}
 

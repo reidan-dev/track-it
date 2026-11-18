@@ -32,6 +32,7 @@ class SharedTrackerEntry(Base):
     state = Column(String, default="unpaid")  # "paid" | "unpaid"
     notes = Column(Text, nullable=True)
     held_by = Column(Integer, ForeignKey("people.id"), nullable=True)
+    period = Column(Integer, nullable=True)  # 1 = 1st-15, 2 = 16th-End; null = unspecified/monthly
     participants = Column(JSON, default=list)  # person ids the amount is split across; 0 = Me
     participant_amounts = Column(JSON, default=dict)  # optional custom per-person split
     linked_record_type = Column(String, nullable=True)  # "income" | "expense" | "bill_payment" | "installment_payment"

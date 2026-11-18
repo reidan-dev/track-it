@@ -50,6 +50,7 @@ def _month_view(db: Session, user_id: int, month: int, year: int) -> list[Shared
                 row_id=row.id, month=month, year=year,
                 amount=prev.amount if prev else None,
                 held_by=prev.held_by if prev else None,
+                period=prev.period if prev else None,
                 participants=(prev.participants or []) if prev else [],
                 participant_amounts=(prev.participant_amounts or {}) if prev else {},
                 state="unpaid",
@@ -126,7 +127,7 @@ def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, d
             propagate_paid(db, user_id, row, entry)
         elif "state" in fields and old_state == "paid" and entry.state != "paid":
             reverse_paid(db, row, entry)
-        elif entry.state == "paid" and fields.keys() & {"amount", "participants", "participant_amounts"}:
+        elif entry.state == "paid" and fields.keys() & {"amount", "held_by", "period", "participants", "participant_amounts"}:
             sync_paid(db, entry)
         db.commit()
     except Exception:
