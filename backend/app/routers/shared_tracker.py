@@ -119,15 +119,18 @@ def _update_entry(entry_id: int, data: SharedTrackerEntryUpdate, user_id: int, d
         valid_ids = {0} | {p.id for p in db.query(Person).filter(Person.user_id == user_id).all()}
         if not set(fields["participants"]).issubset(valid_ids):
             raise HTTPException(status_code=400, detail="participants must be people on this account (or 0 for Me)")
-    old_state = entry.state
     for field, value in fields.items():
         setattr(entry, field, value)
+    # Paid rows always propagate. Unpaid income rows also propagate once a holder
+    # is picked, so money someone's already holding shows up in the balance summary
+    # before it's formally marked paid.
+    should_link = entry.state == "paid" or (row.row_type == "income" and entry.held_by is not None)
     try:
-        if "state" in fields and old_state != "paid" and entry.state == "paid":
+        if should_link and entry.linked_record_id is None:
             propagate_paid(db, user_id, row, entry)
-        elif "state" in fields and old_state == "paid" and entry.state != "paid":
+        elif not should_link and entry.linked_record_id is not None:
             reverse_paid(db, row, entry)
-        elif entry.state == "paid" and fields.keys() & {"amount", "held_by", "period", "participants", "participant_amounts"}:
+        elif entry.linked_record_id is not None and fields.keys() & {"amount", "held_by", "period", "participants", "participant_amounts"}:
             sync_paid(db, entry)
         db.commit()
     except Exception:
