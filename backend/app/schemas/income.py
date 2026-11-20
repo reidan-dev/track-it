@@ -94,6 +94,7 @@ class IncomeOut(BaseModel):
     end_year: Optional[int] = None
     receipts: list[IncomeReceiptOut] = []
     settlements: list[IncomeSettlementOut] = []
+    shared_tracker_state: Optional[str] = None  # "paid" | "unpaid", set only for rows propagated from the shared tracker
 
     @field_validator("participants", mode="before")
     @classmethod

@@ -7,6 +7,7 @@ from app.auth import get_current_user
 from app.models.user import User
 from app.models.income import Income, IncomeReceipt, IncomeParticipantSettlement
 from app.models.deduction import Deduction
+from app.models.shared_tracker import SharedTrackerEntry
 from app.schemas.income import IncomeCreate, IncomeUpdate, IncomeOut, IncomeReceiptOut
 
 router = APIRouter(prefix="/income", tags=["income"])
@@ -33,7 +34,14 @@ def list_income(
         q = q.filter(Income.month == month)
     elif year:
         q = q.filter(Income.year == year)
-    return q.order_by(Income.date.desc()).all()
+    incomes = q.order_by(Income.date.desc()).all()
+    states = dict(db.query(SharedTrackerEntry.linked_record_id, SharedTrackerEntry.state).filter(
+        SharedTrackerEntry.linked_record_type == "income",
+        SharedTrackerEntry.linked_record_id.in_([i.id for i in incomes]),
+    ).all()) if incomes else {}
+    for income in incomes:
+        income.shared_tracker_state = states.get(income.id)
+    return incomes
 
 
 @router.post("", response_model=IncomeOut, status_code=201)

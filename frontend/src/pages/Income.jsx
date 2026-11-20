@@ -303,7 +303,14 @@ export default function Income() {
                   {(e.payable_from || e.due_date) && (
                     <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-xs text-muted-foreground">
                       <CalendarClock className="w-3 h-3 shrink-0" />
-                      {e.payable_from ? <span>from {personName(people, e.payable_from)}</span> : null}
+                      {e.payable_from ? (
+                        <span>
+                          from {personName(people, e.payable_from)}
+                          {e.shared_tracker_state && (
+                            <span className="italic"> ({e.shared_tracker_state === 'paid' ? 'Settled' : 'Pending'})</span>
+                          )}
+                        </span>
+                      ) : null}
                       {e.due_date ? <span>· due {e.due_date}</span> : null}
                     </div>
                   )}
